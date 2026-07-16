@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>AI Blog Builder — Get Started</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232563eb'/%3E%3Ctext x='50' y='68' font-size='46' font-weight='700' font-family='Arial,sans-serif' fill='white' text-anchor='middle'%3EAB%3C/text%3E%3C/svg%3E">
+<style>
+:root{--blue:#2563eb;--blue-l:#dbeafe;--blue-d:#1e40af;--ink:#0f172a;--ink-2:#334155;--muted:#64748b;
+--faint:#94a3b8;--line:#e2e8f0;--bg:#f8fafc;--card:#fff;--ok:#10b981;--ok-bg:#ecfdf5;--warn:#f59e0b;
+--warn-bg:#fffbeb;--err:#ef4444;--err-bg:#fef2f2;--radius:12px;--shadow:0 4px 24px rgba(15,23,42,.07)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;line-height:1.3}p{margin:0}a{color:var(--blue)}
+.shell{max-width:700px;margin:0 auto;padding:32px 20px 64px}
+
+/* Gate */
+.gate{text-align:center;padding:80px 0}
+.gate h1{font-size:24px;margin-bottom:6px}
+.gate p{color:var(--muted);font-size:15px;margin-bottom:24px}
+.gate-row{display:flex;gap:10px;max-width:440px;margin:0 auto}
+.gate-row input{flex:1;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);font-size:15px}
+.gate-row input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.gate-row button{padding:12px 20px;border:0;border-radius:var(--radius);background:var(--blue);color:#fff;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap}
+
+/* Progress */
+.progress{display:flex;gap:6px;margin-bottom:32px}
+.progress .dot{flex:1;height:5px;border-radius:3px;background:var(--line);transition:background .3s}
+.progress .dot.done{background:var(--ok)}.progress .dot.active{background:var(--blue)}
+.step-label{font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+
+/* Card */
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:32px;box-shadow:var(--shadow)}
+.card h2{font-size:22px;margin-bottom:4px}
+.card .sub{color:var(--muted);font-size:15px;margin-bottom:24px}
+
+/* Form */
+label.field{display:block;margin-bottom:18px}
+label.field .lbl{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:5px}
+label.field .hint{display:block;font-size:12px;color:var(--faint);margin-bottom:5px}
+input[type=text],input[type=email],input[type=url],input[type=number],input[type=password],input[type=color],select,textarea{
+width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:15px;font-family:inherit;color:var(--ink);background:#fff;transition:border-color .2s}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+textarea{resize:vertical;min-height:80px}input[type=color]{height:44px;padding:4px 6px;cursor:pointer}
+.field-row{display:flex;gap:8px;align-items:flex-start}
+.field-row input,.field-row textarea,.field-row select{flex:1}
+.field.err input,.field.err textarea,.field.err select{border-color:var(--err)}
+.field-err{font-size:12px;color:var(--err);margin-top:3px;display:none}
+.field.err .field-err{display:block}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border:0;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s,transform .1s}
+.btn:active{transform:scale(.98)}.btn-primary{background:var(--blue);color:#fff}.btn-primary:hover{background:var(--blue-d)}
+.btn-primary:disabled{opacity:.55;cursor:default;transform:none}
+.btn-ghost{background:var(--bg);color:var(--ink);border:1px solid var(--line)}.btn-ghost:hover{background:var(--line)}
+.btn-sm{padding:8px 14px;font-size:13px}
+.btn-row{display:flex;gap:10px;margin-top:28px;justify-content:space-between}.btn-row .spacer{flex:1}
+
+/* AI mini button */
+.btn-ai-sm{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border:0;border-radius:8px;
+background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.btn-ai-sm:hover{filter:brightness(1.08)}.btn-ai-sm:disabled{opacity:.5;cursor:default;filter:none}
+
+/* Big AI button */
+.ai-row{display:flex;gap:10px;margin-bottom:24px}
+.ai-row input{flex:1}
+.btn-ai{background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;white-space:nowrap;padding:12px 20px;border:0;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.btn-ai:hover{filter:brightness(1.08)}.btn-ai:disabled{opacity:.6;cursor:default;filter:none}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.shimmer{background:linear-gradient(90deg,transparent 25%,rgba(37,99,235,.08) 50%,transparent 75%)!important;background-size:200% 100%;animation:shimmer 1.5s infinite}
+
+/* Platforms */
+.platforms{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:20px}
+.plat{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:18px 10px;border:2px solid var(--line);border-radius:var(--radius);cursor:pointer;font-size:13px;font-weight:600;color:var(--ink-2);text-align:center;transition:border-color .2s,background .2s}
+.plat:hover{border-color:var(--blue);background:var(--blue-l)}
+.plat.selected{border-color:var(--blue);background:var(--blue-l);color:var(--blue)}
+.plat.soon{opacity:.5;cursor:default;pointer-events:none}
+.plat .soon-tag{position:absolute;top:6px;right:6px;font-size:9px;font-weight:700;text-transform:uppercase;color:var(--warn);background:var(--warn-bg);padding:2px 5px;border-radius:4px}
+.plat.help-card{border-style:dashed;border-color:var(--faint)}.plat.help-card:hover{border-color:var(--blue);background:var(--blue-l)}
+.plat .p-icon{font-size:22px;font-weight:800}
+
+/* Help form */
+.help-form{display:none;margin-top:16px;padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg)}
+.help-form.show{display:block}.help-form h3{font-size:16px;margin-bottom:12px}
+
+/* Chips */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:20px;font-size:13px;font-weight:600;background:var(--blue-l);color:var(--blue)}
+.chip button{background:none;border:0;color:var(--blue);cursor:pointer;font-size:16px;line-height:1;padding:0}
+.chip-add{display:inline-flex;gap:6px}.chip-add input{width:150px;padding:6px 10px;font-size:13px;border:1px solid var(--line);border-radius:20px}
+
+/* Competitor list */
+.comp-list{margin-bottom:10px}
+.comp-item{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.comp-item span{flex:1;word-break:break-all}.comp-item .comp-reason{color:var(--muted);font-size:12px}
+.comp-item button{background:none;border:0;color:var(--err);cursor:pointer;font-size:18px;padding:0 4px}
+.comp-row{display:flex;gap:8px}.comp-row input{flex:1}
+
+/* Voice presets */
+.voice-presets{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.voice-preset{padding:8px 14px;border:1px solid var(--line);border-radius:20px;font-size:13px;cursor:pointer;background:#fff;color:var(--ink-2);transition:all .15s}
+.voice-preset:hover,.voice-preset.active{border-color:var(--blue);background:var(--blue-l);color:var(--blue)}
+
+/* Range */
+.range-group{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.range-group input[type=range]{flex:1;cursor:pointer}
+.range-group .range-val{font-size:14px;font-weight:600;min-width:40px;text-align:center}
+
+/* Review */
+.summary{display:grid;gap:14px}
+.summary .row{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+.summary .row:last-child{border:0}
+.summary .row .k{color:var(--muted);min-width:140px;font-weight:600;font-size:13px}
+.summary .row .v{color:var(--ink);word-break:break-word}
+
+/* Status */
+.msg{padding:12px 14px;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;display:none}
+.msg.show{display:block}
+.msg.ok{background:var(--ok-bg);color:var(--ok);border:1px solid #a7f3d0}
+.msg.err{background:var(--err-bg);color:var(--err);border:1px solid #fca5a5}
+.msg.info{background:var(--blue-l);color:var(--blue);border:1px solid #93c5fd}
+.msg.warn{background:var(--warn-bg);color:#92400e;border:1px solid #fcd34d}
+
+/* Toggle */
+.toggle-row{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.toggle{position:relative;width:44px;height:24px;cursor:pointer}
+.toggle input{opacity:0;width:0;height:0}
+.toggle .slider{position:absolute;inset:0;background:var(--line);border-radius:12px;transition:background .2s}
+.toggle .slider::before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.toggle input:checked+.slider{background:var(--blue)}.toggle input:checked+.slider::before{transform:translateX(20px)}
+.toggle-label{font-size:14px;font-weight:600;color:var(--ink-2)}
+
+/* Cadence locked */
+.cadence-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;cursor:pointer}
+.cadence-opt.selected{border-color:var(--blue);background:var(--blue-l)}
+.cadence-opt.locked{opacity:.55;cursor:default}
+.cadence-opt .lock-tag{font-size:10px;font-weight:700;color:var(--warn);background:var(--warn-bg);padding:2px 6px;border-radius:4px;text-transform:uppercase}
+.cadence-opt input[type=radio]{margin:0}
+
+/* Validation error box */
+.step-errors{display:none;padding:12px 14px;border-radius:10px;background:var(--err-bg);border:1px solid #fca5a5;margin-bottom:16px;font-size:14px;color:var(--err)}
+.step-errors.show{display:block}
+.step-errors ul{margin:4px 0 0;padding-left:18px}
+
+.step{display:none}.step.active{display:block}
+@media(max-width:500px){.card{padding:20px 16px}.platforms{grid-template-columns:repeat(2,1fr)}.btn-row{flex-wrap:wrap}.summary .row{flex-direction:column;gap:2px}.summary .row .k{min-width:0}.gate-row{flex-direction:column}.ai-row{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- AUTH GATE -->
+<div id="gate" class="gate">
+  <h1>AI Blog Builder</h1>
+  <p>Enter your operator key to get started.</p>
+  <div class="gate-row">
+    <input id="gateKey" type="password" placeholder="ABB_APP_SECRET" autocomplete="off">
+    <button id="gateBtn" class="btn btn-primary" onclick="verifyGate()">Enter</button>
+  </div>
+  <div id="gateMsg" class="msg" style="max-width:440px;margin:14px auto 0"></div>
+</div>
+
+<!-- WIZARD -->
+<div id="wizard" style="display:none">
+<div class="progress" id="progressBar"></div>
+
+<!-- ═══ STEP 1: YOUR WEBSITE ═══ -->
+<div class="step active" data-step="1">
+<div class="card">
+  <div class="step-label">Step 1 of 5</div>
+  <h2>Tell us about your website</h2>
+  <p class="sub">Enter your URL and let our AI analyze your site — or fill in the details manually.</p>
+  <div id="s1err" class="step-errors"></div>
+
+  <div class="ai-row">
+    <input type="url" id="siteUrl" placeholder="https://yoursite.com">
+    <button class="btn-ai" id="analyzeBtn" onclick="runAnalyze()">✦ Let AI fill this form</button>
+  </div>
+  <div id="analyzeMsg" class="msg"></div>
+
+  <label class="field" id="f_siteName">
+    <span class="lbl">Site name</span>
+    <div class="field-row"><input type="text" id="siteName" placeholder="My Business">
+    <button class="btn-ai-sm" onclick="aiFillField('siteName',event)">✦ AI</button></div>
+    <div class="field-err">Please enter your site name.</div>
+  </label>
+
+  <label class="field" id="f_siteDesc">
+    <span class="lbl">What does your business do?</span>
+    <div class="field-row"><textarea id="siteDesc" placeholder="A short description of your business, products, or services…"></textarea>
+    <button class="btn-ai-sm" onclick="aiFillField('siteDesc',event)" style="margin-top:6px">✦ AI</button></div>
+    <div class="field-err">Please describe your business.</div>
+  </label>
+
+  <label class="field" id="f_siteAudience">
+    <span class="lbl">Who is your primary audience?</span>
+    <div class="field-row"><input type="text" id="siteAudience" placeholder="e.g. Small business owners in the UK">
+    <button class="btn-ai-sm" onclick="aiFillField('siteAudience',event)">✦ AI</button></div>
+    <div class="field-err">Please describe your target audience.</div>
+  </label>
+
+  <div style="margin-top:24px">
+    <span class="lbl" style="display:block;margin-bottom:10px">Connect your platform</span>
+    <p class="sub" style="margin-bottom:14px">Where should we publish your articles?</p>
+    <div class="platforms" id="platformGrid"></div>
+    <div id="platErr" class="field-err" style="display:none;margin-bottom:12px">Please select a platform.</div>
+  </div>
+
+  <div id="wpFields" style="display:none;margin-top:8px">
+    <div id="wpAmber" class="msg warn show" style="margin-top:0;margin-bottom:14px">You can skip these now and connect WordPress later — but we can't publish until you do.</div>
+    <label class="field" id="f_wpUrl"><span class="lbl">WordPress site URL</span>
+      <input type="url" id="wpUrl" placeholder="https://myblog.com">
+      <div class="field-err">Enter your WordPress URL to connect.</div></label>
+    <label class="field" id="f_wpAppPass"><span class="lbl">Application Password</span>
+      <span class="hint">Create one in WordPress → Users → Your Profile → Application Passwords. Stored encrypted — never shown again.</span>
+      <input type="password" id="wpAppPass" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autocomplete="new-password">
+      <div class="field-err">Enter your Application Password.</div></label>
+    <label class="field" id="f_wpUser"><span class="lbl">WordPress username</span>
+      <input type="text" id="wpUser" placeholder="admin">
+      <div class="field-err">Enter your WordPress username.</div></label>
+  </div>
+
+  <div class="help-form" id="helpForm">
+    <h3>We'll get in touch!</h3>
+    <p class="sub">Not sure about your platform? Tell us a bit about yourself and we'll help you get set up.</p>
+    <label class="field"><span class="lbl">Your name</span><input type="text" id="helpName" placeholder="John Smith"></label>
+    <label class="field"><span class="lbl">Email</span><input type="email" id="helpEmail" placeholder="john@example.com"></label>
+    <label class="field"><span class="lbl">Tell us about your situation</span><textarea id="helpMessage" placeholder="I have a website but I'm not sure what platform it's on…"></textarea></label>
+    <button class="btn btn-primary btn-sm" onclick="submitHelp()">Send</button>
+    <div id="helpMsg" class="msg"></div>
+  </div>
+
+  <div class="btn-row"><span class="spacer"></span><button class="btn btn-primary" onclick="tryStep(2)">Continue →</button></div>
+</div></div>
+
+<!-- ═══ STEP 2: LANGUAGE & COMPETITORS ═══ -->
+<div class="step" data-step="2">
+<div class="card">
+  <div class="step-label">Step 2 of 5</div>
+  <h2>Language &amp; competitors</h2>
+  <p class="sub">Set your content language and tell us who you're competing with.</p>
+  <div id="s2err" class="step-errors"></div>
+
+  <label class="field" id="f_primaryLang"><span class="lbl">Primary language</span>
+    <select id="primaryLang">
+      <option value="en">English</option><option value="es">Spanish</option><option value="de">German</option>
+      <option value="fr">French</option><option value="it">Italian</option><option value="pt">Portuguese</option>
+      <option value="nl">Dutch</option><option value="hu">Hungarian</option><option value="pl">Polish</option>
+      <option value="sv">Swedish</option><option value="da">Danish</option><option value="no">Norwegian</option>
+      <option value="fi">Finnish</option><option value="ja">Japanese</option><option value="ko">Korean</option>
+      <option value="zh">Chinese</option><option value="ar">Arabic</option><option value="hi">Hindi</option>
+    </select></label>
+
+  <div class="toggle-row">
+    <label class="toggle"><input type="checkbox" id="bilingualToggle" onchange="toggleBilingual()"><span class="slider"></span></label>
+    <span class="toggle-label">Publish in two languages</span>
+    <span style="font-size:11px;color:var(--warn);font-weight:600;background:var(--warn-bg);padding:2px 8px;border-radius:4px">HIGHER PLAN</span>
+  </div>
+  <label class="field" id="secondaryLangField" style="display:none"><span class="lbl">Secondary language</span>
+    <select id="secondaryLang"><option value="es">Spanish</option><option value="en">English</option><option value="de">German</option><option value="fr">French</option><option value="it">Italian</option><option value="pt">Portuguese</option><option value="nl">Dutch</option><option value="hu">Hungarian</option></select></label>
+
+  <div style="margin-top:24px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <span class="lbl" style="margin:0">Competitors</span>
+      <button class="btn-ai-sm" id="compSearchBtn" onclick="findCompetitors()">✦ Find my competitors</button>
+    </div>
+    <p class="hint" style="font-size:12px;color:var(--faint);margin-bottom:10px">We'll analyze their content to find gaps and opportunities for you. Add at least one.</p>
+    <div id="compMsg" class="msg"></div>
+    <div class="comp-list" id="compList"></div>
+    <div class="comp-row">
+      <input type="url" id="compInput" placeholder="https://competitor.com" onkeydown="if(event.key==='Enter'){event.preventDefault();addComp()}">
+      <button class="btn btn-ghost btn-sm" onclick="addComp()">+ Add</button>
+    </div>
+    <div id="compErr" class="field-err" style="display:none;margin-top:6px">Add at least one competitor.</div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-ghost" onclick="goStep(1)">← Back</button>
+    <button class="btn btn-primary" onclick="tryStep(3)">Continue →</button>
+  </div>
+</div></div>
+
+<!-- ═══ STEP 3: BRAND & CONTENT ═══ -->
+<div class="step" data-step="3">
+<div class="card">
+  <div class="step-label">Step 3 of 5</div>
+  <h2>Brand &amp; content style</h2>
+  <p class="sub">Define your visual identity and the voice your content should have.</p>
+  <div id="s3err" class="step-errors"></div>
+
+  <label class="field" id="f_brandColor"><span class="lbl">Brand color</span>
+    <span class="hint">We'll use this across your content and social posts.</span>
+    <div class="field-row"><input type="color" id="brandColor" value="#2563eb">
+    <button class="btn-ai-sm" onclick="aiFillField('brandColor',event)" style="margin-top:6px">✦ AI</button></div></label>
+
+  <div style="margin-bottom:18px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <span class="lbl" style="margin:0">Content categories</span>
+      <button class="btn-ai-sm" onclick="aiFillField('categories',event)">✦ AI suggest</button>
+    </div>
+    <span class="hint" style="display:block;font-size:12px;color:var(--faint);margin-bottom:8px">Topics your blog will cover. Add or remove as needed.</span>
+    <div class="chips" id="catChips"></div>
+    <div class="chip-add">
+      <input type="text" id="catInput" placeholder="New category" onkeydown="if(event.key==='Enter'){event.preventDefault();addCat()}">
+      <button class="btn btn-ghost btn-sm" onclick="addCat()">+ Add</button>
+    </div>
+    <div id="catErr" class="field-err" style="display:none;margin-top:6px">Add at least one category.</div>
+  </div>
+
+  <div style="margin-bottom:18px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <span class="lbl" style="margin:0">Writing voice &amp; tone</span>
+      <button class="btn-ai-sm" onclick="aiFillField('voice',event)">✦ AI suggest</button>
+    </div>
+    <span class="hint" style="display:block;font-size:12px;color:var(--faint);margin-bottom:8px">Pick a starting point or write your own — the AI will match this style for every article.</span>
+    <div class="voice-presets" id="voicePresets"></div>
+    <label class="field" id="f_voice" style="margin-bottom:0">
+      <textarea id="voice" placeholder="Describe how your content should sound…"></textarea>
+      <div class="field-err">Please describe your writing voice.</div>
+    </label>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-ghost" onclick="goStep(2)">← Back</button>
+    <button class="btn btn-primary" onclick="tryStep(4)">Continue →</button>
+  </div>
+</div></div>
+
+<!-- ═══ STEP 4: CALENDAR ═══ -->
+<div class="step" data-step="4">
+<div class="card">
+  <div class="step-label">Step 4 of 5</div>
+  <h2>Publishing calendar</h2>
+  <p class="sub">Set your autopilot schedule — how often and when articles go live.</p>
+  <div id="s4err" class="step-errors"></div>
+
+  <label class="field"><span class="lbl">Content queue size</span>
+    <span class="hint">How many articles to keep queued and ready. We'll auto-generate new topics to maintain this number.</span>
+    <div class="range-group">
+      <input type="range" id="queueTarget" min="5" max="30" value="30" oninput="$('queueVal').textContent=this.value">
+      <span class="range-val" id="queueVal">30</span>
+      <span style="font-size:12px;color:var(--faint)">articles</span>
+    </div>
+    <span class="hint" style="margin-top:4px">Need a larger queue? <span style="color:var(--warn);font-weight:600">Available on higher plans.</span></span>
+  </label>
+
+  <label class="field"><span class="lbl">Timezone</span><select id="timezone"></select></label>
+
+  <div style="margin-bottom:18px">
+    <span class="lbl" style="display:block;margin-bottom:6px">Publish window</span>
+    <span class="hint" style="display:block;font-size:12px;color:var(--faint);margin-bottom:10px">Articles go live at a random time within this window — looks natural, not automated.</span>
+    <div class="range-group"><span style="font-size:13px;font-weight:600;min-width:46px">From</span>
+      <input type="range" id="windowStart" min="0" max="23" value="6" oninput="updateWindowLabel()">
+      <span class="range-val" id="windowStartVal">6:00</span></div>
+    <div class="range-group"><span style="font-size:13px;font-weight:600;min-width:46px">Until</span>
+      <input type="range" id="windowEnd" min="0" max="23" value="18" oninput="updateWindowLabel()">
+      <span class="range-val" id="windowEndVal">18:00</span></div>
+  </div>
+
+  <div style="margin-bottom:18px">
+    <span class="lbl" style="display:block;margin-bottom:8px">Posts per day</span>
+    <div class="cadence-opt selected" onclick="setCadence(1)"><input type="radio" name="cadence" value="1" checked> <span>1 article per day</span></div>
+    <div class="cadence-opt locked"><input type="radio" name="cadence" value="2" disabled> <span>2 articles per day</span> <span class="lock-tag">Higher plan</span></div>
+    <div class="cadence-opt locked"><input type="radio" name="cadence" value="3" disabled> <span>3 articles per day</span> <span class="lock-tag">Higher plan</span></div>
+  </div>
+
+  <div class="toggle-row" style="margin-top:20px">
+    <label class="toggle"><input type="checkbox" id="autoPublish"><span class="slider"></span></label>
+    <div><span class="toggle-label">Fully automated — publish without confirmation</span>
+    <span class="hint" style="display:block;font-size:12px;color:var(--faint)">When off, articles are saved as drafts for your review first.</span></div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-ghost" onclick="goStep(3)">← Back</button>
+    <button class="btn btn-primary" onclick="tryStep(5)">Review →</button>
+  </div>
+</div></div>
+
+<!-- ═══ STEP 5: REVIEW & SAVE ═══ -->
+<div class="step" data-step="5">
+<div class="card">
+  <div class="step-label">Step 5 of 5</div>
+  <h2>Review &amp; launch</h2>
+  <p class="sub">Everything look right? Hit save and your content engine is ready.</p>
+  <div id="s5err" class="step-errors"></div>
+
+  <div class="summary" id="reviewSummary"></div>
+
+  <label class="field" id="f_referral" style="margin-top:20px"><span class="lbl">How did you hear about us?</span>
+    <select id="referral" onchange="toggleReferralOther()">
+      <option value="">— Select —</option><option value="google">Google search</option><option value="social">Social media</option>
+      <option value="friend">Friend or colleague</option><option value="blog">Blog or article</option>
+      <option value="ad">Advertisement</option><option value="other">Other</option>
+    </select>
+    <div class="field-err">Please tell us how you found us.</div></label>
+
+  <label class="field" id="f_referralOther" style="display:none">
+    <span class="lbl">Please specify</span>
+    <input type="text" id="referralOther" placeholder="Where exactly did you hear about us?">
+    <div class="field-err">Please tell us where you heard about us.</div></label>
+
+  <div id="saveMsg" class="msg"></div>
+
+  <div class="btn-row">
+    <button class="btn btn-ghost" onclick="goStep(4)">← Back</button>
+    <button class="btn btn-primary" id="saveBtn" onclick="saveProfile()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+      Save &amp; launch
+    </button>
+  </div>
+</div></div>
+
+<!-- ═══ SUCCESS SCREEN ═══ -->
+<div class="step" data-step="done">
+<div class="card" style="text-align:center;padding:48px 32px">
+  <div style="font-size:48px;margin-bottom:16px">🎉</div>
+  <h2 style="font-size:24px;margin-bottom:8px">All set!</h2>
+  <p class="sub" style="margin-bottom:24px;font-size:16px">Your profile is saved and your content engine is being prepared.<br>We'll take it from here.</p>
+  <div style="background:var(--ok-bg);border:1px solid #a7f3d0;border-radius:12px;padding:16px;font-size:14px;color:var(--ok)">
+    <strong>What happens next:</strong><br><span id="doneNext">Your topics and content calendar are being prepared. New articles will appear in your WordPress as drafts, ready for your review.</span>
+  </div>
+  <div id="doneWpLine" class="msg" style="text-align:left"></div>
+</div></div>
+
+</div>
+</div>
+
+<script>
+const API = "/api/app";
+let SECRET = "";
+let STEP = 1;
+const STEPS = 5;
+
+let categories = [];
+let competitors = [];
+let selectedPlatform = "";
+let analysisCache = null;
+let cadence = 1;
+
+const $ = id => document.getElementById(id);
+
+/* ═══ VOICE PRESETS ═══ */
+const VOICE_PRESETS = [
+  { label: "Professional & trusted", text: "Authoritative yet approachable. Use clear, confident language. Position the business as a trusted expert without being condescending." },
+  { label: "Friendly & approachable", text: "Warm, conversational tone. Write like a helpful friend who happens to be an expert. Use everyday language and relatable examples." },
+  { label: "Bold & punchy", text: "Direct, no-nonsense, scroll-stopping. Short sentences. Name the problem, cut through the noise. Every word earns its place." },
+];
+
+function renderVoicePresets() {
+  $("voicePresets").innerHTML = VOICE_PRESETS.map((p, i) =>
+    `<div class="voice-preset" onclick="pickVoice(${i})">${esc(p.label)}</div>`
+  ).join("");
+}
+function pickVoice(i) {
+  $("voice").value = VOICE_PRESETS[i].text;
+  document.querySelectorAll(".voice-preset").forEach((el, j) => el.classList.toggle("active", j === i));
+}
+
+/* ═══ PLATFORMS ═══ */
+const PLATFORMS = [
+  { id:"wordpress",name:"WordPress",icon:"W",active:true },
+  { id:"shopify",name:"Shopify",icon:"S",active:false },
+  { id:"webflow",name:"Webflow",icon:"Wf",active:false },
+  { id:"wix",name:"Wix",icon:"Wx",active:false },
+  { id:"squarespace",name:"Squarespace",icon:"Sq",active:false },
+  { id:"ghost",name:"Ghost",icon:"G",active:false },
+  { id:"webhook",name:"Webhook / API",icon:"{ }",active:false },
+  { id:"help",name:"I don\u2019t know —\nI need help",icon:"?",active:true,isHelp:true },
+];
+
+function renderPlatforms() {
+  $("platformGrid").innerHTML = PLATFORMS.map(p => {
+    const cls = ["plat", !p.active&&!p.isHelp?"soon":"", p.isHelp?"help-card":"", selectedPlatform===p.id?"selected":""].filter(Boolean).join(" ");
+    const tag = !p.active&&!p.isHelp ? '<span class="soon-tag">Soon</span>' : '';
+    return `<div class="${cls}" onclick="${p.active||p.isHelp?`selectPlatform('${p.id}')`:''}">
+      <span class="p-icon" style="color:${p.isHelp?'var(--faint)':'var(--ink-2)'}">${p.icon}</span>${p.name.replace(/\n/g,"<br>")}${tag}</div>`;
+  }).join("");
+}
+function selectPlatform(id) {
+  selectedPlatform = id;
+  renderPlatforms();
+  $("wpFields").style.display = id==="wordpress" ? "block" : "none";
+  $("helpForm").className = "help-form" + (id==="help" ? " show" : "");
+  $("platErr").style.display = "none";
+}
+
+/* ═══ AUTH GATE ═══ */
+async function verifyGate() {
+  const key = $("gateKey").value.trim();
+  if (!key) return showMsg("gateMsg","err","Enter your operator key.");
+  $("gateBtn").disabled = true; $("gateBtn").textContent = "Checking…";
+  try {
+    const r = await apiFetch("GET",`${API}/tenants`,null,key);
+    if (!r.ok) throw new Error(r.data.error||"Invalid key.");
+    SECRET = key; sessionStorage.setItem("abb_key",key);
+    $("gate").style.display = "none"; $("wizard").style.display = "block";
+    renderProgress(); renderPlatforms(); renderVoicePresets(); populateTimezones();
+  } catch(e) { showMsg("gateMsg","err",e.message); }
+  finally { $("gateBtn").disabled = false; $("gateBtn").textContent = "Enter"; }
+}
+(function(){ const s=sessionStorage.getItem("abb_key"); if(s){$("gateKey").value=s;verifyGate();} })();
+
+/* ═══ NAVIGATION + VALIDATION ═══ */
+function goStep(n) {
+  if(n<1||n>STEPS+1) return;
+  STEP = n;
+  document.querySelectorAll(".step").forEach(s => s.classList.toggle("active",
+    s.dataset.step === (n>STEPS?"done":String(n))));
+  renderProgress();
+  if(n===5) renderReview();
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+function tryStep(target) {
+  const errs = validateStep(STEP);
+  const errBox = $("s"+STEP+"err");
+  if (errs.length) {
+    if(errBox){ errBox.className="step-errors show"; errBox.innerHTML="<strong>Please fix:</strong><ul>"+errs.map(e=>"<li>"+e+"</li>").join("")+"</ul>"; }
+    return;
+  }
+  if(errBox) errBox.className="step-errors";
+  goStep(target);
+}
+
+function validateStep(step) {
+  const errs = [];
+  const req = (id, msg) => { const el=$(id); const f=el.closest(".field")||el;
+    if(!el.value.trim()){ f.classList.add("err"); errs.push(msg); } else { f.classList.remove("err"); } };
+
+  if(step===1){
+    req("siteUrl","Enter your website URL.");
+    req("siteName","Enter your site name.");
+    req("siteDesc","Describe your business.");
+    req("siteAudience","Describe your target audience.");
+    if(!selectedPlatform){ $("platErr").style.display="block"; errs.push("Select a publishing platform."); }
+    else { $("platErr").style.display="none"; }
+    // WP soft-require: if ANY wp field is filled, all three are required
+    if(selectedPlatform==="wordpress"){
+      const wpU=$("wpUrl").value.trim(), wpP=$("wpAppPass").value.trim(), wpN=$("wpUser").value.trim();
+      const anyFilled = wpU||wpP||wpN;
+      if(anyFilled){
+        if(!wpU){ $("f_wpUrl").classList.add("err"); errs.push("Enter your WordPress URL."); } else $("f_wpUrl").classList.remove("err");
+        if(!wpP){ $("f_wpAppPass").classList.add("err"); errs.push("Enter your Application Password."); } else $("f_wpAppPass").classList.remove("err");
+        if(!wpN){ $("f_wpUser").classList.add("err"); errs.push("Enter your WordPress username."); } else $("f_wpUser").classList.remove("err");
+      }
+    }
+    // Help form: if help selected, name+email required
+    if(selectedPlatform==="help"){
+      if(!$("helpName").value.trim()) errs.push("Enter your name (in the help form).");
+      if(!$("helpEmail").value.trim()) errs.push("Enter your email (in the help form).");
+    }
+  }
+  if(step===2){
+    if(!competitors.length){ $("compErr").style.display="block"; errs.push("Add at least one competitor."); }
+    else $("compErr").style.display="none";
+  }
+  if(step===3){
+    if(!categories.length){ $("catErr").style.display="block"; errs.push("Add at least one content category."); }
+    else $("catErr").style.display="none";
+    req("voice","Describe your writing voice and tone.");
+  }
+  if(step===4){
+    const s=+$("windowStart").value, e=+$("windowEnd").value;
+    if(e<=s) errs.push("Publish window end must be after start.");
+  }
+  if(step===5){
+    req("referral","Tell us how you heard about us.");
+    if($("referral").value==="other") req("referralOther","Please specify where you heard about us.");
+  }
+  return errs;
+}
+
+function renderProgress() {
+  $("progressBar").innerHTML = "";
+  for(let i=1;i<=STEPS;i++){ const d=document.createElement("div"); d.className="dot"+(i<STEP?" done":"")+(i===STEP?" active":""); $("progressBar").appendChild(d); }
+}
+
+/* ═══ AI ANALYZE (full site — cached) ═══ */
+async function runAnalyze() {
+  const url = $("siteUrl").value.trim();
+  if(!url) return showMsg("analyzeMsg","err","Enter a website URL first.");
+  const btn = $("analyzeBtn");
+  btn.disabled = true; btn.innerHTML = "✦ Analyzing…";
+  showMsg("analyzeMsg","info","Reading your website — this takes about 10 seconds…");
+  ["siteName","siteDesc","siteAudience","voice"].forEach(id => $(id).classList.add("shimmer"));
+
+  try {
+    const r = await apiFetch("POST",`${API}/analyze`,{url});
+    if(!r.ok) throw new Error(r.data.error||"Analysis failed.");
+    analysisCache = r.data.analysis;
+    const a = analysisCache;
+
+    const fills=[["siteName",a.siteName||""],["siteDesc",a.description||""],["siteAudience",a.audience||""],["voice",a.voice||""],["brandColor",a.brandColor||"#2563eb"]];
+    for(const [id,val] of fills){ await sleep(200); $(id).classList.remove("shimmer"); if($(id).type==="color") $(id).value=val; else $(id).value=val; }
+
+    if(a.categories&&a.categories.length){ categories=[...a.categories]; renderCats(); }
+    if(a.primaryLanguage) $("primaryLang").value = a.primaryLanguage;
+    if(a.detectedBilingual){ $("bilingualToggle").checked=true; toggleBilingual(); if(a.secondaryLanguage) $("secondaryLang").value=a.secondaryLanguage; }
+
+    showMsg("analyzeMsg","ok","Done! Review the fields and adjust anything that needs tweaking.");
+  } catch(e){ showMsg("analyzeMsg","err",e.message); }
+  finally { ["siteName","siteDesc","siteAudience","voice"].forEach(id=>$(id).classList.remove("shimmer")); btn.disabled=false; btn.innerHTML="✦ Let AI fill this form"; }
+}
+
+/* Fetch + cache the analysis WITHOUT touching any fields */
+async function ensureAnalysis(btn) {
+  if (analysisCache) return true;
+  const url = $("siteUrl").value.trim();
+  if (!url) { showMsg("analyzeMsg","err","Enter your website URL first, then click the AI button."); return false; }
+  const old = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "✦ …"; }
+  try {
+    const r = await apiFetch("POST",`${API}/analyze`,{url});
+    if (!r.ok) throw new Error(r.data.error||"Analysis failed.");
+    analysisCache = r.data.analysis;
+    return true;
+  } catch(e) { showMsg("analyzeMsg","err",e.message); return false; }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+}
+
+/* Per-field AI button — fills ONLY its own field (big button fills all) */
+async function aiFillField(fieldId, ev) {
+  const btn = ev ? ev.target : null;
+  const el = fieldId === "categories" ? null : $(fieldId);
+  if (el) el.classList.add("shimmer");
+  const ok = await ensureAnalysis(btn);
+  if (el) el.classList.remove("shimmer");
+  if (!ok) return;
+  const a = analysisCache;
+  if (fieldId === "categories") {
+    if (a.categories && a.categories.length) { categories = [...a.categories]; renderCats(); }
+    return;
+  }
+  const map = { siteName:a.siteName, siteDesc:a.description, siteAudience:a.audience, voice:a.voice, brandColor:a.brandColor };
+  const val = map[fieldId];
+  if (val !== undefined && el) { el.value = val || (el.type === "color" ? "#2563eb" : ""); }
+}
+
+/* ═══ COMPETITORS ═══ */
+function renderComps() {
+  $("compList").innerHTML = competitors.map((c,i) => {
+    const label = typeof c==="object" ? `<span>${esc(c.url)}</span>${c.reason?'<span class="comp-reason"> — '+esc(c.reason)+'</span>':''}` : `<span>${esc(c)}</span>`;
+    return `<div class="comp-item">${label}<button onclick="removeComp(${i})">&times;</button></div>`;
+  }).join("");
+}
+function addComp() {
+  let v=$("compInput").value.trim(); if(!v) return;
+  if(!/^https?:\/\//i.test(v)) v="https://"+v;
+  const url = typeof competitors[0]==="object" ? v : v;
+  if(competitors.some(c=>(typeof c==="object"?c.url:c)===v)) return;
+  competitors.push(typeof competitors[0]==="object"?{url:v,name:"",reason:""}:v);
+  $("compInput").value=""; renderComps(); $("compErr").style.display="none";
+}
+function removeComp(i){ competitors.splice(i,1); renderComps(); }
+
+async function findCompetitors() {
+  const niche = analysisCache?.niche || $("siteAudience").value.trim();
+  const audience = $("siteAudience").value.trim();
+  const siteUrl = $("siteUrl").value.trim();
+  if(!niche&&!audience) return showMsg("compMsg","err","Fill in your audience first so we know who to search for.");
+  const btn=$("compSearchBtn");
+  btn.disabled=true; btn.textContent="✦ Searching…";
+  showMsg("compMsg","info","Searching the web for your competitors — this may take 15-30 seconds…");
+  try {
+    const r = await apiFetch("POST",`${API}/competitors`,{niche,audience,siteUrl,primaryLanguage:$("primaryLang").value});
+    if(!r.ok) throw new Error(r.data.error||"Search failed.");
+    if(r.data.competitors&&r.data.competitors.length){
+      competitors = r.data.competitors;
+      renderComps();
+      showMsg("compMsg","ok","Found "+competitors.length+" competitors. Remove any that don't fit, or add your own.");
+    } else { showMsg("compMsg","warn","No competitors found — try adding them manually."); }
+  } catch(e){ showMsg("compMsg","err",e.message); }
+  finally{ btn.disabled=false; btn.textContent="✦ Find my competitors"; }
+}
+
+/* ═══ CATEGORIES ═══ */
+function renderCats() {
+  $("catChips").innerHTML = categories.map((c,i) =>
+    `<span class="chip">${esc(c)} <button onclick="removeCat(${i})">&times;</button></span>`
+  ).join("");
+  $("catErr").style.display = "none";
+}
+function addCat(){ const v=$("catInput").value.trim(); if(!v||categories.includes(v)) return; categories.push(v); $("catInput").value=""; renderCats(); }
+function removeCat(i){ categories.splice(i,1); renderCats(); }
+
+/* ═══ BILINGUAL ═══ */
+function toggleBilingual(){ $("secondaryLangField").style.display=$("bilingualToggle").checked?"block":"none"; }
+
+/* ═══ TIMEZONE ═══ */
+function populateTimezones(){
+  const sel=$("timezone");
+  const zones = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : ["Europe/Madrid","Europe/London","America/New_York","America/Los_Angeles","Asia/Tokyo","UTC"];
+  const guess = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  sel.innerHTML = zones.map(z=>`<option value="${z}"${z===guess?" selected":""}>${z.replace(/_/g," ")}</option>`).join("");
+}
+function updateWindowLabel(){ $("windowStartVal").textContent=$("windowStart").value+":00"; $("windowEndVal").textContent=$("windowEnd").value+":00"; }
+
+/* ═══ CADENCE ═══ */
+function setCadence(v){
+  cadence=v;
+  document.querySelectorAll(".cadence-opt:not(.locked)").forEach(el=>{
+    const r=el.querySelector("input[type=radio]");
+    el.classList.toggle("selected",+r.value===v); r.checked=+r.value===v;
+  });
+}
+
+/* ═══ REFERRAL ═══ */
+function toggleReferralOther(){
+  $("f_referralOther").style.display = $("referral").value==="other"?"block":"none";
+  $("f_referral").classList.remove("err");
+}
+
+/* ═══ HELP FORM ═══ */
+async function submitHelp(){
+  const name=$("helpName").value.trim(), email=$("helpEmail").value.trim(), message=$("helpMessage").value.trim();
+  if(!name||!email) return showMsg("helpMsg","err","Please fill in your name and email.");
+  try{
+    const r=await apiFetch("POST",`${API}/help`,{name,email,message,siteUrl:$("siteUrl").value.trim()});
+    if(!r.ok) throw new Error(r.data.error||"Failed to send.");
+    showMsg("helpMsg","ok","Sent! We'll be in touch soon.");
+    $("helpName").value="";$("helpEmail").value="";$("helpMessage").value="";
+  }catch(e){showMsg("helpMsg","err",e.message);}
+}
+
+/* ═══ REVIEW ═══ */
+function renderReview(){
+  const bil=$("bilingualToggle").checked;
+  const LN={en:"English",es:"Spanish",de:"German",fr:"French",it:"Italian",pt:"Portuguese",nl:"Dutch",hu:"Hungarian",pl:"Polish",sv:"Swedish",da:"Danish",no:"Norwegian",fi:"Finnish",ja:"Japanese",ko:"Korean",zh:"Chinese",ar:"Arabic",hi:"Hindi"};
+  const PN={}; PLATFORMS.forEach(p=>PN[p.id]=p.name);
+  const autoLabel=$("autoPublish").checked?"Fully automated (publish immediately)":"Draft first (you review before publishing)";
+  const rows=[
+    ["Site",esc($("siteName").value)||"—"],["URL",esc($("siteUrl").value)||"—"],
+    ["Description",esc($("siteDesc").value)||"—"],["Audience",esc($("siteAudience").value)||"—"],
+    ["Platform",PN[selectedPlatform]||"Not selected"],
+    ["Language",LN[$("primaryLang").value]+(bil?" + "+LN[$("secondaryLang").value]:"")],
+    ["Competitors",competitors.length?competitors.map(c=>esc(typeof c==="object"?c.url:c)).join(", "):"None"],
+    ["Brand color",'<span style="display:inline-block;width:18px;height:18px;border-radius:4px;vertical-align:middle;background:'+$("brandColor").value+'"></span> '+$("brandColor").value],
+    ["Categories",categories.length?esc(categories.join(", ")):"None"],
+    ["Voice",esc($("voice").value)||"—"],
+    ["Queue size",$("queueTarget").value+" articles"],
+    ["Timezone",esc($("timezone").value)],
+    ["Publish window",$("windowStart").value+":00 – "+$("windowEnd").value+":00"],
+    ["Publishing",autoLabel],
+  ];
+  $("reviewSummary").innerHTML=rows.map(([k,v])=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+}
+
+/* ═══ SAVE ═══ */
+async function saveProfile(){
+  const errs=validateStep(5);
+  if(errs.length){ const b=$("s5err"); b.className="step-errors show"; b.innerHTML="<strong>Please fix:</strong><ul>"+errs.map(e=>"<li>"+e+"</li>").join("")+"</ul>"; return; }
+  $("s5err").className="step-errors";
+
+  const btn=$("saveBtn"); btn.disabled=true; btn.textContent="Saving…";
+  const bil=$("bilingualToggle").checked;
+  const wpUrl=$("wpUrl").value.trim(), wpUser=$("wpUser").value.trim(), wpPass=$("wpAppPass").value.trim();
+  const hasWpCreds = selectedPlatform==="wordpress"&&!!(wpUrl&&wpUser&&wpPass);
+
+  // Tenant ID = domain
+  const tenantId = extractDomain($("siteUrl").value.trim());
+  if(!tenantId){ showMsg("saveMsg","err","Could not extract domain from your URL."); btn.disabled=false; btn.textContent="Save & launch"; return; }
+
+  const profile={
+    siteName:$("siteName").value.trim(),
+    siteUrl:$("siteUrl").value.trim(),
+    description:$("siteDesc").value.trim(),
+    audience:$("siteAudience").value.trim(),
+    niche:analysisCache?.niche||$("siteAudience").value.trim(),
+    primaryLanguage:$("primaryLang").value,
+    bilingual:bil, secondaryLanguage:bil?$("secondaryLang").value:null,
+    competitors:competitors.map(c=>typeof c==="object"?c.url:c),
+    brandColor:$("brandColor").value,
+    voice:$("voice").value.trim(),
+    categories:categories,
+    blogUrlPattern:analysisCache?.blogUrlPattern||"",
+    integration:{
+      type:selectedPlatform||"wordpress",
+      status:selectedPlatform==="help"?"needs-help":(hasWpCreds?"connected":"needs-auth"),
+      defaults:{publishAs:$("autoPublish").checked?"publish":"draft"},
+    },
+    queueTarget:parseInt($("queueTarget").value)||30,
+    timezone:$("timezone").value,
+    publishWindow:{startHour:parseInt($("windowStart").value),endHour:parseInt($("windowEnd").value)},
+    cadence:cadence,
+    referralSource:$("referral").value==="other"?("other: "+$("referralOther").value.trim()):$("referral").value,
+  };
+
+  try{
+    const payload={action:"create",id:tenantId,profile};
+    if(hasWpCreds) payload.credentials={wordpress:{url:wpUrl,username:wpUser,appPassword:wpPass}};
+    const r=await apiFetch("POST",`${API}/tenants`,payload);
+    if(!r.ok) throw new Error(r.data.error||"Save failed.");
+
+    // If help was selected, also submit the help request
+    if(selectedPlatform==="help"&&$("helpName").value.trim()){
+      await apiFetch("POST",`${API}/help`,{name:$("helpName").value.trim(),email:$("helpEmail").value.trim(),message:$("helpMessage").value.trim(),siteUrl:$("siteUrl").value.trim()}).catch(()=>{});
+    }
+
+    // Success screen — honest wording based on their settings
+    $("doneNext").textContent = $("autoPublish").checked
+      ? "Your topics and content calendar are being prepared. New articles will publish to your WordPress automatically."
+      : "Your topics and content calendar are being prepared. New articles will appear in your WordPress as drafts, ready for your review.";
+    goStep(STEPS+1);
+
+    // Live-verify the WordPress connection so the tenant gets real confirmation
+    if (hasWpCreds) {
+      showMsg("doneWpLine","info","Checking your WordPress connection…");
+      apiFetch("GET",`${API}/wp-test?id=`+encodeURIComponent(tenantId)).then(r=>{
+        if (r.ok && r.data.connected) showMsg("doneWpLine","ok","✓ WordPress connected — logged in as "+(r.data.user.displayName||r.data.user.username)+".");
+        else showMsg("doneWpLine","warn","⚠ WordPress connection couldn't be verified: "+(r.data.error||"unknown error")+" — we'll retry before publishing.");
+      }).catch(()=>{});
+    } else if (selectedPlatform === "wordpress") {
+      showMsg("doneWpLine","warn","⚠ WordPress isn't connected yet — articles can't publish until you connect it.");
+    }
+  }catch(e){
+    showMsg("saveMsg","err",e.message);
+    btn.disabled=false; btn.textContent="Save & launch";
+  }
+}
+
+/* ═══ UTILS ═══ */
+function extractDomain(url){
+  try{ let u=url; if(!/^https?:\/\//i.test(u)) u="https://"+u;
+    return new URL(u).hostname.replace(/^www\./,""); }catch{return "";}
+}
+async function apiFetch(method,url,body,sec){
+  const h={"x-app-secret":sec||SECRET}; if(body) h["content-type"]="application/json";
+  const res=await fetch(url,{method,headers:h,body:body?JSON.stringify(body):undefined});
+  return{ok:res.ok,status:res.status,data:await res.json().catch(()=>({}))};
+}
+function showMsg(id,kind,text){ const el=$(id); el.className="msg show "+kind; el.textContent=text; }
+function esc(s){ const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+</script>
+</body>
+</html>
