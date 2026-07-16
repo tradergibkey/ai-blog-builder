@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>AI Blog Builder — Setup Check</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232563eb'/%3E%3Ctext x='50' y='68' font-size='46' font-weight='700' font-family='Arial,sans-serif' fill='white' text-anchor='middle'%3EAB%3C/text%3E%3C/svg%3E">
+  <style>
+    :root { --blue:#2563eb; --ok:#0f9d58; --err:#d93025; --ink:#1f2430; --muted:#6b7280; --line:#e5e7eb; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#f4f6fb; color:var(--ink);
+           font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+           display:flex; min-height:100vh; align-items:flex-start; justify-content:center; padding:32px 16px; }
+    .card { background:#fff; width:100%; max-width:620px; border:1px solid var(--line);
+            border-radius:16px; padding:28px; box-shadow:0 6px 24px rgba(20,30,60,.06); }
+    h1 { font-size:20px; margin:0 0 4px; }
+    .muted { color:var(--muted); font-size:14px; margin:0 0 20px; }
+    code { background:#eef1f7; padding:1px 6px; border-radius:5px; font-size:13px; }
+    label { display:block; font-size:13px; font-weight:600; margin:0 0 6px; }
+    input { width:100%; padding:11px 12px; border:1px solid var(--line); border-radius:10px; font-size:15px; }
+    input:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(37,99,235,.15); }
+    .btns { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0 4px; }
+    button { border:0; border-radius:10px; padding:11px 16px; font-size:14px; font-weight:600;
+             color:#fff; background:var(--blue); cursor:pointer; }
+    button:hover { filter:brightness(1.05); }
+    button.ghost { background:#eef1f7; color:var(--ink); }
+    button:disabled { opacity:.55; cursor:default; }
+    .status { margin-top:16px; padding:12px 14px; border-radius:10px; font-size:14px; font-weight:600; display:none; }
+    .status.show { display:block; }
+    .status.ok  { background:#e7f5ec; color:var(--ok);  border:1px solid #b6e3c6; }
+    .status.err { background:#fdecea; color:var(--err); border:1px solid #f5b5ae; }
+    .status.info{ background:#eef1f7; color:var(--muted); border:1px solid var(--line); }
+    pre { background:#0f1420; color:#d7e0f0; border-radius:12px; padding:16px; overflow:auto;
+          font-size:12.5px; line-height:1.45; margin-top:14px; max-height:340px; }
+    pre:empty { display:none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>AI Blog Builder — Setup Check</h1>
+    <p class="muted">Phase&nbsp;0 foundation. Paste your <code>ABB_APP_SECRET</code>, then run the two checks. This page does nothing without the correct secret, and it never touches the live Campoverde blog.</p>
+
+    <label for="secret">ABB_APP_SECRET</label>
+    <input id="secret" type="password" placeholder="paste your operator secret" autocomplete="off">
+
+    <div class="btns">
+      <button id="seedBtn">1 · Seed Campoverde</button>
+      <button id="listBtn">2 · Check tenants</button>
+      <button id="viewBtn" class="ghost">View profile</button>
+    </div>
+
+    <div id="status" class="status"></div>
+    <pre id="out"></pre>
+
+    <hr style="border:0;border-top:1px solid var(--line);margin:28px 0 20px">
+    <h2 style="font-size:16px;margin:0 0 10px;color:var(--blue)">WordPress connection test</h2>
+    <p class="muted" style="margin-bottom:12px">Enter the tenant ID (domain) to test their WordPress connection.</p>
+    <div style="display:flex;gap:10px;margin-bottom:4px">
+      <input id="wpTestId" type="text" placeholder="e.g. yourdomain.com" style="flex:1">
+      <button id="wpTestBtn" style="background:var(--blue);white-space:nowrap">Test WP</button>
+    </div>
+    <div id="wpTestStatus" class="status"></div>
+    <pre id="wpTestOut" style="margin-top:8px"></pre>
+
+    <hr style="border:0;border-top:1px solid var(--line);margin:28px 0 20px">
+    <h2 style="font-size:16px;margin:0 0 10px;color:var(--blue)">Quick publish test</h2>
+    <p class="muted" style="margin-bottom:12px">Generate an article and publish it to a tenant's WordPress as a draft.</p>
+    <div style="display:flex;gap:10px;margin-bottom:8px">
+      <input id="pubId" type="text" placeholder="tenant ID (domain)" style="flex:1">
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:4px">
+      <input id="pubTopic" type="text" placeholder="Article topic" style="flex:1">
+      <button id="pubBtn" style="background:var(--ok);white-space:nowrap">Generate &amp; publish</button>
+    </div>
+    <div id="pubStatus" class="status"></div>
+    <pre id="pubOut" style="margin-top:8px"></pre>
+
+    <hr style="border:0;border-top:1px solid var(--line);margin:28px 0 20px">
+    <h2 style="font-size:16px;margin:0 0 10px;color:var(--blue)">Topics &amp; queue (calendar)</h2>
+    <p class="muted" style="margin-bottom:12px">Fill a tenant's content queue with AI-generated topics, or view what's queued.</p>
+    <div style="display:flex;gap:10px;margin-bottom:4px">
+      <input id="topicsId" type="text" placeholder="tenant ID (domain)" style="flex:1">
+      <button id="topicsBtn" style="white-space:nowrap">Generate topics</button>
+      <button id="queueBtn" class="ghost" style="white-space:nowrap">View queue</button>
+    </div>
+    <div id="topicsStatus" class="status"></div>
+    <pre id="topicsOut" style="margin-top:8px"></pre>
+
+    <hr style="border:0;border-top:1px solid var(--line);margin:28px 0 20px">
+    <h2 style="font-size:16px;margin:0 0 10px;color:var(--err)">Delete a tenant</h2>
+    <p class="muted" style="margin-bottom:12px">Enter the tenant ID (the domain, e.g. <code>yourdomain.com</code>) to permanently remove it.</p>
+    <div style="display:flex;gap:10px;margin-bottom:4px">
+      <input id="delId" type="text" placeholder="tenant ID (domain)" style="flex:1">
+      <button id="delBtn" style="background:var(--err);white-space:nowrap">Delete tenant</button>
+    </div>
+    <div id="delStatus" class="status"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const ENDPOINT = "/api/app/tenants";           // matches the api/app/ folder
+
+    const secret = () => $("secret").value.trim();
+
+    function show(kind, msg, data) {
+      const s = $("status");
+      s.className = "status show " + kind;          // kind: ok | err | info
+      s.textContent = msg;
+      $("out").textContent = data ? JSON.stringify(data, null, 2) : "";
+    }
+
+    async function call(method, { url = ENDPOINT, body = null } = {}) {
+      if (!secret()) { show("err", "Enter your ABB_APP_SECRET first."); return null; }
+      const headers = { "x-app-secret": secret() };
+      if (body) headers["content-type"] = "application/json";
+      try {
+        const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+        const data = await res.json().catch(() => ({}));
+        return { res, data };
+      } catch (e) {
+        show("err", "Network error: " + e.message + " — is the site deployed yet?");
+        return null;
+      }
+    }
+
+    function busy(on) { ["seedBtn","listBtn","viewBtn","delBtn","wpTestBtn","pubBtn","topicsBtn","queueBtn"].forEach(id => { const e=$(id); if(e) e.disabled=on; }); }
+
+    $("topicsBtn").onclick = async () => {
+      const id = $("topicsId").value.trim();
+      if (!id) { const s=$("topicsStatus"); s.className="status show err"; s.textContent="Enter a tenant ID."; return; }
+      busy(true);
+      const s=$("topicsStatus"); s.className="status show info"; s.textContent="Generating topics — this can take up to a minute…";
+      $("topicsOut").textContent="";
+      const r = await call("POST", { url: ENDPOINT.replace("tenants","topics"), body: { id } });
+      busy(false);
+      if (!r) return;
+      if (r.data.ok) {
+        s.className="status show ok";
+        s.textContent = r.data.added ? ("✅ Added "+r.data.count+" topics to the queue.") : ("ℹ️ "+(r.data.reason||"Queue already full."));
+        $("topicsOut").textContent=JSON.stringify(r.data.topics||r.data, null, 2);
+      } else { s.className="status show err"; s.textContent="❌ "+(r.data.error||"HTTP "+r.res.status); $("topicsOut").textContent=JSON.stringify(r.data,null,2); }
+    };
+
+    $("queueBtn").onclick = async () => {
+      const id = $("topicsId").value.trim();
+      if (!id) { const s=$("topicsStatus"); s.className="status show err"; s.textContent="Enter a tenant ID."; return; }
+      busy(true);
+      const s=$("topicsStatus"); s.className="status show info"; s.textContent="Loading queue…";
+      const r = await call("GET", { url: ENDPOINT.replace("tenants","queue") + "?id=" + encodeURIComponent(id) });
+      busy(false);
+      if (!r) return;
+      if (r.res.ok) {
+        s.className="status show ok"; s.textContent="✅ Queue: "+(r.data.queue||[]).length+" topics · History: "+(r.data.history||[]).length+" published.";
+        $("topicsOut").textContent=JSON.stringify(r.data, null, 2);
+      } else { s.className="status show err"; s.textContent="❌ "+(r.data.error||"HTTP "+r.res.status); }
+    };
+
+    $("wpTestBtn").onclick = async () => {
+      const id = $("wpTestId").value.trim();
+      if (!id) { const s=$("wpTestStatus"); s.className="status show err"; s.textContent="Enter a tenant ID."; return; }
+      busy(true);
+      const s=$("wpTestStatus"); s.className="status show info"; s.textContent="Testing WordPress connection…";
+      $("wpTestOut").textContent="";
+      const r = await call("GET", { url: ENDPOINT.replace("tenants","wp-test") + "?id=" + encodeURIComponent(id) });
+      busy(false);
+      if (!r) return;
+      if (r.data.ok && r.data.connected) {
+        s.className="status show ok"; s.textContent="✅ Connected! Logged in as " + (r.data.user.displayName || r.data.user.username);
+        $("wpTestOut").textContent=JSON.stringify(r.data, null, 2);
+      } else {
+        s.className="status show err"; s.textContent="❌ " + (r.data.error || "Connection failed.");
+        $("wpTestOut").textContent=JSON.stringify(r.data, null, 2);
+      }
+    };
+
+    $("pubBtn").onclick = async () => {
+      const id = $("pubId").value.trim();
+      const topic = $("pubTopic").value.trim();
+      if (!id || !topic) { const s=$("pubStatus"); s.className="status show err"; s.textContent="Enter tenant ID and topic."; return; }
+      if (!confirm("Generate an article about \"" + topic + "\" and publish to " + id + "'s WordPress?")) return;
+      busy(true);
+      const s=$("pubStatus"); s.className="status show info"; s.textContent="Generating article and publishing — this takes 30-60 seconds…";
+      $("pubOut").textContent="";
+      const r = await call("POST", { url: ENDPOINT.replace("tenants","publish"), body: { id, topic } });
+      busy(false);
+      if (!r) return;
+      if (r.data.ok) {
+        s.className="status show ok"; s.textContent="✅ Published! " + (r.data.post.status === "draft" ? "Saved as draft" : "Live") + " → " + r.data.post.url;
+        $("pubOut").textContent=JSON.stringify(r.data, null, 2);
+      } else {
+        s.className="status show err"; s.textContent="❌ " + (r.data.error || "Publish failed.");
+        $("pubOut").textContent=JSON.stringify(r.data, null, 2);
+      }
+    };
+
+    $("delBtn").onclick = async () => {
+      const id = $("delId").value.trim();
+      if (!id) { const s=$("delStatus"); s.className="status show err"; s.textContent="Enter a tenant ID."; return; }
+      if (!confirm("Permanently delete tenant \"" + id + "\"? This cannot be undone.")) return;
+      busy(true);
+      const s = $("delStatus"); s.className="status show info"; s.textContent="Deleting…";
+      const r = await call("POST", { body: { action: "delete", id } });
+      busy(false);
+      if (!r) return;
+      if (r.res.ok && r.data.ok) { s.className="status show ok"; s.textContent="✅ Tenant \"" + id + "\" deleted."; $("delId").value=""; }
+      else { s.className="status show err"; s.textContent="❌ " + (r.data.error || "HTTP " + r.res.status); }
+    };
+
+    $("seedBtn").onclick = async () => {
+      busy(true); show("info", "Seeding…");
+      const r = await call("POST", { body: { action: "seed-campoverde" } });
+      busy(false);
+      if (!r) return;
+      if (r.res.ok && r.data.ok) show("ok", "✅ Seeded — Campoverde is now tenant #1.", r.data.profile);
+      else show("err", "❌ " + (r.data.error || ("HTTP " + r.res.status)), r.data);
+    };
+
+    $("listBtn").onclick = async () => {
+      busy(true); show("info", "Checking…");
+      const r = await call("GET");
+      busy(false);
+      if (!r) return;
+      if (r.res.ok && r.data.ok) show("ok", "✅ Found " + (r.data.tenants || []).length + " tenant(s).", r.data.tenants);
+      else show("err", "❌ " + (r.data.error || ("HTTP " + r.res.status)), r.data);
+    };
+
+    $("viewBtn").onclick = async () => {
+      busy(true); show("info", "Loading Campoverde profile…");
+      const r = await call("GET", { url: ENDPOINT + "?id=campoverde" });
+      busy(false);
+      if (!r) return;
+      if (r.res.ok && r.data.ok) show("ok", "✅ Campoverde profile loaded.", r.data.profile);
+      else show("err", "❌ " + (r.data.error || ("HTTP " + r.res.status)), r.data);
+    };
+  </script>
+</body>
+</html>
