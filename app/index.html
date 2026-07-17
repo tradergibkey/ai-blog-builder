@@ -79,7 +79,14 @@ background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;font-size:12px
 .plat.soon{opacity:.5;cursor:default;pointer-events:none}
 .plat .soon-tag{position:absolute;top:6px;right:6px;font-size:9px;font-weight:700;text-transform:uppercase;color:var(--warn);background:var(--warn-bg);padding:2px 5px;border-radius:4px}
 .plat.help-card{border-style:dashed;border-color:var(--faint)}.plat.help-card:hover{border-color:var(--blue);background:var(--blue-l)}
-.plat .p-icon{font-size:22px;font-weight:800}
+.plat .p-icon{font-size:22px;font-weight:800;display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:10px;background:var(--bg);transition:transform .18s cubic-bezier(.34,1.56,.64,1)}
+.plat:hover .p-icon,.plat.selected .p-icon{transform:scale(1.06)}
+.plat.selected{box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.plat .p-icon.html-icon{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:15px;color:#fff;background:linear-gradient(135deg,#1e293b,#334155)}
+.plat.selected .p-icon.html-icon{background:linear-gradient(135deg,var(--blue),var(--blue-d))}
+/* inline code + monospace token fields */
+code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.86em;background:var(--bg);border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:var(--ink-2)}
+#ghToken,#ghRepo,#ghBranch{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:14px;letter-spacing:.01em}
 
 /* Help form */
 .help-form{display:none;margin-top:16px;padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg)}
@@ -220,6 +227,22 @@ background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;font-size:12px
     <label class="field" id="f_wpUser"><span class="lbl">WordPress username</span>
       <input type="text" id="wpUser" placeholder="admin">
       <div class="field-err">Enter your WordPress username.</div></label>
+  </div>
+
+  <div id="ghFields" style="display:none;margin-top:8px">
+    <div class="msg info show" style="margin-top:0;margin-bottom:14px">Articles are committed straight to your repo as HTML — published live on commit. You'll need a GitHub token with write access to the repo.</div>
+    <label class="field" id="f_ghRepo"><span class="lbl">GitHub repository</span>
+      <span class="hint">The <code>owner/name</code> of the repo Vercel deploys from.</span>
+      <input type="text" id="ghRepo" placeholder="username/my-website" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="field-err">Enter your repository as owner/name.</div></label>
+    <label class="field" id="f_ghBranch"><span class="lbl">Branch</span>
+      <span class="hint">Usually <code>main</code>.</span>
+      <input type="text" id="ghBranch" placeholder="main" value="main" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="field-err">Enter the branch to commit to.</div></label>
+    <label class="field" id="f_ghToken"><span class="lbl">GitHub token</span>
+      <span class="hint">Fine-grained token with <strong>Contents: Read and write</strong> on this repo. Stored encrypted — never shown again.</span>
+      <input type="password" id="ghToken" placeholder="github_pat_…" autocomplete="new-password" spellcheck="false">
+      <div class="field-err">Enter your GitHub token.</div></label>
   </div>
 
   <div class="help-form" id="helpForm">
@@ -461,6 +484,7 @@ function pickVoice(i) {
 /* ═══ PLATFORMS ═══ */
 const PLATFORMS = [
   { id:"wordpress",name:"WordPress",icon:"W",active:true },
+  { id:"html",name:"HTML / Static",icon:"&lt;/&gt;",active:true },
   { id:"shopify",name:"Shopify",icon:"S",active:false },
   { id:"webflow",name:"Webflow",icon:"Wf",active:false },
   { id:"wix",name:"Wix",icon:"Wx",active:false },
@@ -474,14 +498,17 @@ function renderPlatforms() {
   $("platformGrid").innerHTML = PLATFORMS.map(p => {
     const cls = ["plat", !p.active&&!p.isHelp?"soon":"", p.isHelp?"help-card":"", selectedPlatform===p.id?"selected":""].filter(Boolean).join(" ");
     const tag = !p.active&&!p.isHelp ? '<span class="soon-tag">Soon</span>' : '';
+    const iconCls = "p-icon" + (p.id==="html" ? " html-icon" : "");
+    const iconStyle = (p.id==="html") ? "" : `style="color:${p.isHelp?'var(--faint)':'var(--ink-2)'}"`;
     return `<div class="${cls}" onclick="${p.active||p.isHelp?`selectPlatform('${p.id}')`:''}">
-      <span class="p-icon" style="color:${p.isHelp?'var(--faint)':'var(--ink-2)'}">${p.icon}</span>${p.name.replace(/\n/g,"<br>")}${tag}</div>`;
+      <span class="${iconCls}" ${iconStyle}>${p.icon}</span>${p.name.replace(/\n/g,"<br>")}${tag}</div>`;
   }).join("");
 }
 function selectPlatform(id) {
   selectedPlatform = id;
   renderPlatforms();
   $("wpFields").style.display = id==="wordpress" ? "block" : "none";
+  $("ghFields").style.display = id==="html" ? "block" : "none";
   $("helpForm").className = "help-form" + (id==="help" ? " show" : "");
   $("platErr").style.display = "none";
 }
@@ -544,6 +571,18 @@ function validateStep(step) {
         if(!wpU){ $("f_wpUrl").classList.add("err"); errs.push("Enter your WordPress URL."); } else $("f_wpUrl").classList.remove("err");
         if(!wpP){ $("f_wpAppPass").classList.add("err"); errs.push("Enter your Application Password."); } else $("f_wpAppPass").classList.remove("err");
         if(!wpN){ $("f_wpUser").classList.add("err"); errs.push("Enter your WordPress username."); } else $("f_wpUser").classList.remove("err");
+      }
+    }
+    // GitHub soft-require: if ANY gh field is filled, repo + token are required
+    if(selectedPlatform==="html"){
+      const ghR=$("ghRepo").value.trim(), ghT=$("ghToken").value.trim(), ghB=$("ghBranch").value.trim();
+      const anyFilled = ghR||ghT||(ghB&&ghB!=="main");
+      if(anyFilled){
+        if(!ghR){ $("f_ghRepo").classList.add("err"); errs.push("Enter your GitHub repository (owner/name)."); } else $("f_ghRepo").classList.remove("err");
+        if(!ghT){ $("f_ghToken").classList.add("err"); errs.push("Enter your GitHub token."); } else $("f_ghToken").classList.remove("err");
+        if(!ghB){ $("f_ghBranch").classList.add("err"); errs.push("Enter the branch."); } else $("f_ghBranch").classList.remove("err");
+        // basic owner/name shape check
+        if(ghR && !/^[^\/\s]+\/[^\/\s]+$/.test(ghR)){ $("f_ghRepo").classList.add("err"); errs.push("Repository must be in owner/name format."); }
       }
     }
     // Help form: if help selected, name+email required
@@ -757,6 +796,8 @@ async function saveProfile(){
   const bil=$("bilingualToggle").checked;
   const wpUrl=$("wpUrl").value.trim(), wpUser=$("wpUser").value.trim(), wpPass=$("wpAppPass").value.trim();
   const hasWpCreds = selectedPlatform==="wordpress"&&!!(wpUrl&&wpUser&&wpPass);
+  const ghRepo=$("ghRepo").value.trim(), ghBranch=$("ghBranch").value.trim()||"main", ghToken=$("ghToken").value.trim();
+  const hasGhCreds = selectedPlatform==="html"&&!!(ghRepo&&ghToken);
 
   // Tenant ID = domain
   const tenantId = extractDomain($("siteUrl").value.trim());
@@ -776,8 +817,8 @@ async function saveProfile(){
     categories:categories,
     blogUrlPattern:analysisCache?.blogUrlPattern||"",
     integration:{
-      type:selectedPlatform||"wordpress",
-      status:selectedPlatform==="help"?"needs-help":(hasWpCreds?"connected":"needs-auth"),
+      type:selectedPlatform==="html"?"github-static":(selectedPlatform||"wordpress"),
+      status:selectedPlatform==="help"?"needs-help":((hasWpCreds||hasGhCreds)?"connected":"needs-auth"),
       defaults:{publishAs:$("autoPublish").checked?"publish":"draft"},
     },
     queueTarget:parseInt($("queueTarget").value)||30,
@@ -790,6 +831,7 @@ async function saveProfile(){
   try{
     const payload={action:"create",id:tenantId,profile};
     if(hasWpCreds) payload.credentials={wordpress:{url:wpUrl,username:wpUser,appPassword:wpPass}};
+    else if(hasGhCreds) payload.credentials={github:{repo:ghRepo,branch:ghBranch,token:ghToken}};
     const r=await apiFetch("POST",`${API}/tenants`,payload);
     if(!r.ok) throw new Error(r.data.error||"Save failed.");
 
@@ -799,12 +841,17 @@ async function saveProfile(){
     }
 
     // Success screen — honest wording based on their settings
-    $("doneNext").textContent = $("autoPublish").checked
-      ? "Your topics and content calendar are being prepared. New articles will publish to your WordPress automatically."
-      : "Your topics and content calendar are being prepared. New articles will appear in your WordPress as drafts, ready for your review.";
+    const isGh = selectedPlatform==="html";
+    if (isGh) {
+      $("doneNext").textContent = "Your topics and content calendar are being prepared. New articles will be committed to your GitHub repo and go live automatically.";
+    } else {
+      $("doneNext").textContent = $("autoPublish").checked
+        ? "Your topics and content calendar are being prepared. New articles will publish to your WordPress automatically."
+        : "Your topics and content calendar are being prepared. New articles will appear in your WordPress as drafts, ready for your review.";
+    }
     goStep(STEPS+1);
 
-    // Live-verify the WordPress connection so the tenant gets real confirmation
+    // Connection confirmation per integration type
     if (hasWpCreds) {
       showMsg("doneWpLine","info","Checking your WordPress connection…");
       apiFetch("GET",`${API}/wp-test?id=`+encodeURIComponent(tenantId)).then(r=>{
@@ -813,6 +860,10 @@ async function saveProfile(){
       }).catch(()=>{});
     } else if (selectedPlatform === "wordpress") {
       showMsg("doneWpLine","warn","⚠ WordPress isn't connected yet — articles can't publish until you connect it.");
+    } else if (isGh && hasGhCreds) {
+      showMsg("doneWpLine","ok","✓ GitHub connected — committing to "+esc(ghRepo)+" ("+esc(ghBranch)+").");
+    } else if (isGh) {
+      showMsg("doneWpLine","warn","⚠ GitHub isn't connected yet — articles can't publish until you add your repo and token.");
     }
   }catch(e){
     showMsg("saveMsg","err",e.message);
