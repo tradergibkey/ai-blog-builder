@@ -6,7 +6,7 @@
 //
 //      https://<domain>/api/app/cron?key=<ABB_CRON_SECRET or ABB_APP_SECRET>
 //
-//  Per active WordPress tenant, each ping:
+//  Per active tenant (WordPress or github-static), each ping:
 //    0. Refills the content queue to queueTarget (via /api/app/topics)
 //    1. If no plan for today and we're inside the tenant's publish window
 //       (in THEIR timezone): pick the next due topic, roll a random HH:MM
@@ -23,8 +23,8 @@
 //      a timeout can't cause a re-publish loop.
 //    • History-based guard: if the same topic was already published today,
 //      the plan is marked done instead of publishing twice.
-//    • Tenants that aren't WordPress-integrated (e.g. Campoverde's
-//      github-static) are skipped — this cron cannot touch them.
+//    • Tenants with an unsupported integration type, or missing credentials
+//      for their type, are skipped.
 //
 //  AUTH:  ?key=SECRET  or  x-app-secret header  or  Authorization: Bearer
 //         Accepts ABB_CRON_SECRET (recommended, optional) or ABB_APP_SECRET.
@@ -61,12 +61,20 @@ export default async function handler(req, res) {
         const profile = await getProfile(t.id);
         if (!profile) { r.action = "skipped"; r.reason = "no profile"; results.push(r); continue; }
 
-        // Only WordPress tenants — github-static (Campoverde) et al are untouched
-        if (profile.integration?.type !== "wordpress") {
-          r.action = "skipped"; r.reason = "not a WordPress tenant"; results.push(r); continue;
-        }
-        if (!(await hasSecret(t.id, "wp_app_password"))) {
-          r.action = "skipped"; r.reason = "WordPress not connected"; results.push(r); continue;
+        // Route by integration type. Both WordPress and github-static publish
+        // through /api/app/publish (which branches internally). Each needs its
+        // own "is it connected?" credential check before we bother planning.
+        const intType = profile.integration?.type || "wordpress";
+        if (intType === "wordpress") {
+          if (!(await hasSecret(t.id, "wp_app_password"))) {
+            r.action = "skipped"; r.reason = "WordPress not connected"; results.push(r); continue;
+          }
+        } else if (intType === "github-static") {
+          if (!(await hasSecret(t.id, "github_token"))) {
+            r.action = "skipped"; r.reason = "GitHub not connected"; results.push(r); continue;
+          }
+        } else {
+          r.action = "skipped"; r.reason = `unsupported integration: ${intType}`; results.push(r); continue;
         }
 
         const now = tzNow(profile.timezone);

@@ -40,6 +40,12 @@ export default async function handler(req, res) {
     const profile = await getProfile(id);
     if (!profile) return res.status(404).json({ error: `Tenant "${id}" not found.` });
 
+    // ---- Route by integration type. github-static publishes by committing an
+    //      HTML file to the tenant's repo; WordPress (default) continues below. ----
+    if (profile.integration?.type === "github-static") {
+      return await publishToGitHub(req, res, id, profile, body);
+    }
+
     const wpUrl     = await getSecret(id, "wp_url");
     const wpUser    = await getSecret(id, "wp_username");
     const wpAppPass = await getSecret(id, "wp_app_password");
@@ -153,6 +159,273 @@ export default async function handler(req, res) {
     console.error("publish error:", err);
     return res.status(500).json({ error: String(err && err.message || err) });
   }
+}
+
+// =============================================================================
+//  GITHUB-STATIC PUBLISHER
+// -----------------------------------------------------------------------------
+//  For tenants whose site is a static repo (HTML/CSS/JS on GitHub → Vercel).
+//  Publishing = committing files:
+//    1. Generate the article (reuse generate.js) if not supplied
+//    2. Pick a Pexels hero image URL (hotlinked — no media library)
+//    3. Read blog/post-template.html from the repo, fill placeholders
+//    4. Commit the filled post to blog/posts/<slug>.html
+//    5. Read blog/index.html, inject a card between the BLOG-LIST markers,
+//       drop the empty-state placeholder, commit it back
+//    6. Log to tenant history
+//
+//  Credentials (from _secrets): github_repo ("owner/name"), github_branch,
+//  github_token (PAT with Contents: read+write on that repo).
+// =============================================================================
+async function publishToGitHub(req, res, id, profile, body) {
+  const repo   = await getSecret(id, "github_repo");
+  const branch = (await getSecret(id, "github_branch")) || "main";
+  const token  = await getSecret(id, "github_token");
+
+  if (!repo || !token) {
+    return res.status(400).json({ error: "GitHub not connected. Add repo + token in the wizard." });
+  }
+
+  const gh = {
+    token,
+    api: `https://api.github.com/repos/${repo}/contents`,
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "AIBlogBuilder/2.0",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  };
+
+  // ---- 1) Get the article (pre-generated or generate now) ----
+  let article = body.article || null;
+
+  if (!article) {
+    const topic    = (body.topic || "").trim();
+    const category = (body.category || "").trim();
+    if (!topic) return res.status(400).json({ error: "Provide either 'article' or 'topic'." });
+
+    const siteBase = process.env.SITE_BASE_URL || `https://${req.headers.host}`;
+    const genRes = await fetch(`${siteBase}/api/app/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-app-secret": process.env.ABB_APP_SECRET },
+      body: JSON.stringify({ id, topic, category }),
+    });
+    const genData = await genRes.json().catch(() => ({}));
+    if (!genRes.ok || !genData.ok) {
+      throw new Error("Content generation failed: " + (genData.error || genRes.status));
+    }
+    article = genData.article;
+  }
+
+  if (!article || !article.title || !article.body) {
+    return res.status(400).json({ error: "Article missing title or body." });
+  }
+
+  // ---- 2) Hero image (hotlinked Pexels URL — no upload) ----
+  let heroImg = "";
+  if (article.imageQuery && process.env.PEXELS_API_KEY) {
+    try {
+      heroImg = await pexelsImageUrl(article.imageQuery);
+    } catch (e) {
+      console.error("Pexels lookup failed (continuing without hero):", e.message);
+    }
+  }
+  // Fallback: the site's own OG cover so {{HERO_IMG}} is never empty
+  if (!heroImg) heroImg = `${(profile.siteUrl || "").replace(/\/+$/, "")}/img/og-cover.jpg`;
+
+  // ---- 3) Build slug + dates ----
+  const slug = slugify(article.title);
+  const now  = new Date();
+  const dateIso     = now.toISOString();
+  const dateDisplay = formatDateHu(now, profile.primaryLanguage || "hu");
+
+  // ---- 4) Read the post template from the repo ----
+  const templatePath = "blog/post-template.html";
+  const templateFile = await ghGetFile(gh, templatePath, branch);
+  if (!templateFile) {
+    return res.status(400).json({ error: `Could not read ${templatePath} from ${repo}. Check the repo has the ABB blog structure.` });
+  }
+  const template = b64decode(templateFile.content);
+
+  // Strip the leading HTML comment block (the <!-- BLOG POST TEMPLATE ... --> note)
+  const cleanTemplate = template.replace(/<!--[\s\S]*?-->\s*/, "");
+
+  const postHtml = cleanTemplate
+    .replace(/\{\{TITLE\}\}/g,        esc(article.title))
+    .replace(/\{\{DESCRIPTION\}\}/g,  esc(article.metaDescription || article.excerpt || ""))
+    .replace(/\{\{SLUG\}\}/g,         slug)
+    .replace(/\{\{DATE_ISO\}\}/g,     dateIso)
+    .replace(/\{\{DATE_DISPLAY\}\}/g, esc(dateDisplay))
+    .replace(/\{\{HERO_IMG\}\}/g,     esc(heroImg))
+    .replace(/\{\{CONTENT\}\}/g,      article.body); // body is trusted HTML from generate.js
+
+  // ---- 5) Commit the post file ----
+  const postPath = `blog/posts/${slug}.html`;
+  const existingPost = await ghGetFile(gh, postPath, branch); // may already exist → update
+  await ghPutFile(gh, postPath, branch,
+    `Add blog post: ${article.title}`,
+    b64encode(postHtml),
+    existingPost?.sha
+  );
+
+  // ---- 6) Inject a card into blog/index.html ----
+  let cardInjected = false;
+  try {
+    const indexPath = "blog/index.html";
+    const indexFile = await ghGetFile(gh, indexPath, branch);
+    if (indexFile) {
+      const indexHtml = b64decode(indexFile.content);
+      const updated = injectCard(indexHtml, {
+        slug, title: article.title,
+        excerpt: article.excerpt || article.metaDescription || "",
+        heroImg, dateIso, dateDisplay,
+      });
+      if (updated && updated !== indexHtml) {
+        await ghPutFile(gh, indexPath, branch,
+          `Add "${article.title}" to blog index`,
+          b64encode(updated),
+          indexFile.sha
+        );
+        cardInjected = true;
+      }
+    }
+  } catch (e) {
+    console.error("Index card injection failed (post still committed):", e.message);
+  }
+
+  // ---- 7) Log to tenant history ----
+  const postUrl = `${(profile.siteUrl || "").replace(/\/+$/, "")}/blog/posts/${slug}`;
+  await addHistory(id, {
+    title:        article.title,
+    url:          postUrl,
+    status:       "publish",       // a commit is live — no draft concept
+    category:     article.category || null,
+    language:     article.language || profile.primaryLanguage || "hu",
+    topic:        article.topic || "",
+    published_at: dateIso,
+  });
+
+  return res.status(200).json({
+    ok: true, id,
+    post: {
+      title:  article.title,
+      url:    postUrl,
+      status: "publish",
+      slug,
+      featuredImage: !!heroImg,
+      indexUpdated: cardInjected,
+    },
+  });
+}
+
+// ---- GitHub Contents API helpers ----
+async function ghGetFile(gh, path, branch) {
+  const r = await fetch(`${gh.api}/${encodeURIComponent(path).replace(/%2F/g, "/")}?ref=${encodeURIComponent(branch)}`, {
+    headers: gh.headers,
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`GitHub GET ${path} failed: ${r.status} ${(await r.text()).slice(0, 200)}`);
+  return await r.json();
+}
+
+async function ghPutFile(gh, path, branch, message, contentB64, sha) {
+  const payload = { message, content: contentB64, branch };
+  if (sha) payload.sha = sha; // required to update an existing file
+  const r = await fetch(`${gh.api}/${encodeURIComponent(path).replace(/%2F/g, "/")}`, {
+    method: "PUT",
+    headers: { ...gh.headers, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) throw new Error(`GitHub PUT ${path} failed: ${r.status} ${(await r.text()).slice(0, 300)}`);
+  return await r.json();
+}
+
+// Inject a post card between <!-- BLOG-LIST-START --> and <!-- BLOG-LIST-END -->,
+// removing the empty-state block if present. Newest card goes first.
+// Card HTML matches the site's existing .post-card / .post-body CSS classes.
+function injectCard(indexHtml, p) {
+  const startMark = "<!-- BLOG-LIST-START -->";
+  const endMark   = "<!-- BLOG-LIST-END -->";
+  const si = indexHtml.indexOf(startMark);
+  const ei = indexHtml.indexOf(endMark);
+  if (si === -1 || ei === -1 || ei < si) return indexHtml; // markers missing → leave untouched
+
+  const before = indexHtml.slice(0, si + startMark.length);
+  let   middle = indexHtml.slice(si + startMark.length, ei);
+  const after  = indexHtml.slice(ei);
+
+  // Drop the placeholder grid/empty-state on first real post
+  middle = middle.replace(/<div class="post-grid"[^>]*id="post-grid"[^>]*>[\s\S]*?<\/div>\s*(?=<!-- BLOG-LIST-END)/, "");
+  // If an empty-state remains for any reason, strip it
+  middle = middle.replace(/<div class="empty-state"[\s\S]*?<\/div>\s*/g, "");
+
+  const card = `
+    <article class="post-card">
+      <a href="/blog/posts/${p.slug}">
+        <img src="${esc(p.heroImg)}" alt="${esc(p.title)}" class="post-card-img" loading="lazy">
+      </a>
+      <div class="post-body">
+        <time datetime="${p.dateIso}">${esc(p.dateDisplay)}</time>
+        <h3><a href="/blog/posts/${p.slug}">${esc(p.title)}</a></h3>
+        <p>${esc(p.excerpt)}</p>
+        <a href="/blog/posts/${p.slug}" class="card-link">Tovább olvasom →</a>
+      </div>
+    </article>`;
+
+  // Ensure there's a grid wrapper to hold cards; if none, create one.
+  if (/id="post-grid"/.test(middle)) {
+    middle = middle.replace(/(<div class="post-grid"[^>]*id="post-grid"[^>]*>)/, `$1${card}`);
+  } else if (/<div class="post-grid"/.test(middle)) {
+    middle = middle.replace(/(<div class="post-grid"[^>]*>)/, `$1${card}`);
+  } else {
+    middle = `\n    <div class="post-grid" id="post-grid">${card}\n    </div>\n    `;
+  }
+
+  return before + middle + after;
+}
+
+// ---- Text/encoding utilities ----
+function slugify(title) {
+  const map = { á:"a",é:"e",í:"i",ó:"o",ö:"o",ő:"o",ú:"u",ü:"u",ű:"u",
+                Á:"a",É:"e",Í:"i",Ó:"o",Ö:"o",Ő:"o",Ú:"u",Ü:"u",Ű:"u",
+                ñ:"n",ç:"c",à:"a",è:"e",ì:"i",ò:"o",ù:"u" };
+  return String(title)
+    .toLowerCase()
+    .replace(/[áéíóöőúüűÁÉÍÓÖŐÚÜŰñçàèìòù]/g, ch => map[ch] || ch)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // strip any remaining diacritics
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || `post-${Date.now().toString(36)}`;
+}
+
+function formatDateHu(d, lang) {
+  try {
+    const locale = lang === "hu" ? "hu-HU" : (lang || "en");
+    return new Intl.DateTimeFormat(locale, { year: "numeric", month: "long", day: "numeric" }).format(d);
+  } catch { return d.toISOString().slice(0, 10); }
+}
+
+function b64encode(str) { return Buffer.from(str, "utf-8").toString("base64"); }
+function b64decode(b64) { return Buffer.from(b64, "base64").toString("utf-8"); }
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+async function pexelsImageUrl(query) {
+  const r = await fetch(
+    `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=5&orientation=landscape`,
+    { headers: { Authorization: process.env.PEXELS_API_KEY } }
+  );
+  if (!r.ok) throw new Error(`Pexels ${r.status}`);
+  const data = await r.json();
+  const photos = data.photos || [];
+  if (!photos.length) throw new Error("No Pexels images for: " + query);
+  const photo = photos[Math.floor(Math.random() * photos.length)];
+  return photo.src?.large2x || photo.src?.large || photo.src?.original || "";
 }
 
 // ---------------------------------------------------------------------------

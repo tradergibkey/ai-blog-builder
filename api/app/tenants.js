@@ -38,10 +38,19 @@ function uid() {
 // parallel writes raced and the last write erased the others (v2 bug).
 async function storeCredentials(tenantId, creds) {
   if (!creds || typeof creds !== "object") return;
+
+  // WordPress credentials
   const wp = creds.wordpress || {};
   if (wp.url)         await setSecret(tenantId, "wp_url",          String(wp.url).trim());
   if (wp.username)    await setSecret(tenantId, "wp_username",     String(wp.username).trim());
   if (wp.appPassword) await setSecret(tenantId, "wp_app_password", String(wp.appPassword).trim());
+
+  // GitHub (static-site) credentials — SEQUENTIAL for the same read-modify-write
+  // reason as WP above: parallel writes to the shared secrets bag race.
+  const gh = creds.github || {};
+  if (gh.repo)   await setSecret(tenantId, "github_repo",   String(gh.repo).trim());
+  if (gh.branch) await setSecret(tenantId, "github_branch", String(gh.branch).trim());
+  if (gh.token)  await setSecret(tenantId, "github_token",  String(gh.token).trim());
 }
 
 export default async function handler(req, res) {
