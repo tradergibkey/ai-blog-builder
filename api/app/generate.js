@@ -72,7 +72,15 @@ SEO RULES:
 - The excerpt should be 1-2 sentences summarizing the article.
 
 IMAGE:
-- Suggest a Pexels search query (2-4 words) that would find a relevant, professional hero image.
+- Suggest THREE Pexels search queries (2-4 words each) for relevant, professional photos:
+  1. heroImageQuery: for the hero/banner image at the top — should represent the article's main topic visually.
+  2. inlineImageQuery1: for an image placed after the first major section — should match THAT section's specific subject.
+  3. inlineImageQuery2: for an image placed after the second major section — should match THAT section's specific subject.
+- IMPORTANT: Each query should be specific and visual (e.g. "polished black granite surface", "white marble veins closeup", "stone engraving workshop"). Avoid generic queries like "memorial" or "plaque" — search for the MATERIAL, TEXTURE, PROCESS, or SETTING described in that section.
+- All three queries must be meaningfully different from each other.
+- Place the literal marker {{INLINE_IMG_1}} in the body HTML after the first major H2 section ends (before the next H2).
+- Place the literal marker {{INLINE_IMG_2}} in the body HTML after the second major H2 section ends (before the next H2).
+- Do NOT wrap these markers in any HTML tag — just place them on their own line between sections.
 
 Call the write_article tool with your complete article.`;
 
@@ -83,12 +91,14 @@ Call the write_article tool with your complete article.`;
         type: "object",
         properties: {
           title:           { type: "string", description: "SEO-friendly article title" },
-          body:            { type: "string", description: "Full article body in HTML (h2, h3, p, ul, li — no h1)" },
+          body:            { type: "string", description: "Full article body in HTML (h2, h3, p, ul, li — no h1). Must include {{INLINE_IMG_1}} after the first H2 section and {{INLINE_IMG_2}} after the second H2 section." },
           excerpt:         { type: "string", description: "1-2 sentence summary" },
           metaDescription: { type: "string", description: "SEO meta description, 150-160 chars" },
-          imageQuery:      { type: "string", description: "Pexels search query for hero image, 2-4 words" },
+          heroImageQuery:      { type: "string", description: "Pexels search query for the hero banner image, 2-4 words, specific to the article topic" },
+          inlineImageQuery1:   { type: "string", description: "Pexels search query for inline image after section 1, 2-4 words, specific to that section" },
+          inlineImageQuery2:   { type: "string", description: "Pexels search query for inline image after section 2, 2-4 words, specific to that section" },
         },
-        required: ["title", "body", "excerpt", "metaDescription", "imageQuery"],
+        required: ["title", "body", "excerpt", "metaDescription", "heroImageQuery", "inlineImageQuery1", "inlineImageQuery2"],
       },
     };
 
@@ -129,6 +139,16 @@ Write the complete article in ${langName}. Make it practical, engaging, and SEO-
     article.language = lang;
     article.category = category;
     article.topic = topic;
+
+    // Backward compat: old WP publish path reads article.imageQuery
+    // New schema uses heroImageQuery / inlineImageQuery1 / inlineImageQuery2
+    if (article.heroImageQuery && !article.imageQuery) {
+      article.imageQuery = article.heroImageQuery;
+    }
+    // If Claude used the old field name (shouldn't, but defensive)
+    if (article.imageQuery && !article.heroImageQuery) {
+      article.heroImageQuery = article.imageQuery;
+    }
 
     return res.status(200).json({ ok: true, id, article });
 
