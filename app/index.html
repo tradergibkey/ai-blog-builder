@@ -87,6 +87,7 @@ background:linear-gradient(135deg,var(--blue),#7c3aed);color:#fff;font-size:12px
 /* inline code + monospace token fields */
 code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.86em;background:var(--bg);border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:var(--ink-2)}
 #ghToken,#ghRepo,#ghBranch{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:14px;letter-spacing:.01em}
+.gh-step-num{display:flex;align-items:center;justify-content:center;width:26px;height:26px;min-width:26px;border-radius:50%;background:var(--blue);color:#fff;font-size:13px;font-weight:700;margin-top:1px}
 
 /* Help form */
 .help-form{display:none;margin-top:16px;padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg)}
@@ -230,19 +231,56 @@ code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
   </div>
 
   <div id="ghFields" style="display:none;margin-top:8px">
-    <div class="msg info show" style="margin-top:0;margin-bottom:14px">Articles are committed straight to your repo as HTML — published live on commit. You'll need a GitHub token with write access to the repo.</div>
-    <label class="field" id="f_ghRepo"><span class="lbl">GitHub repository</span>
-      <span class="hint">The <code>owner/name</code> of the repo Vercel deploys from.</span>
-      <input type="text" id="ghRepo" placeholder="username/my-website" autocomplete="off" autocapitalize="off" spellcheck="false">
-      <div class="field-err">Enter your repository as owner/name.</div></label>
-    <label class="field" id="f_ghBranch"><span class="lbl">Branch</span>
-      <span class="hint">Usually <code>main</code>.</span>
-      <input type="text" id="ghBranch" placeholder="main" value="main" autocomplete="off" autocapitalize="off" spellcheck="false">
-      <div class="field-err">Enter the branch to commit to.</div></label>
-    <label class="field" id="f_ghToken"><span class="lbl">GitHub token</span>
-      <span class="hint">Fine-grained token with <strong>Contents: Read and write</strong> on this repo. Stored encrypted — never shown again.</span>
-      <input type="password" id="ghToken" placeholder="github_pat_…" autocomplete="new-password" spellcheck="false">
-      <div class="field-err">Enter your GitHub token.</div></label>
+
+    <!-- Gate: do you have a repo? -->
+    <div id="ghGate">
+      <div class="msg info show" style="margin-top:0;margin-bottom:16px">Articles are committed straight to your GitHub repo as HTML — published live on every commit.</div>
+      <p style="font-weight:600;font-size:15px;margin-bottom:12px">Do you already have a GitHub repository for your website?</p>
+      <div style="display:flex;gap:10px;margin-bottom:4px">
+        <button type="button" class="btn btn-primary btn-sm" onclick="ghGateAnswer(true)" style="flex:1">Yes, I have a repo</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="ghGateAnswer(false)" style="flex:1">No, I need help</button>
+      </div>
+    </div>
+
+    <!-- Credential fields (hidden until gate = yes) -->
+    <div id="ghCredsPanel" style="display:none">
+
+      <!-- Guided token flow -->
+      <div style="margin-bottom:18px">
+        <button type="button" class="gh-guide-toggle" onclick="toggleGhGuide()" id="ghGuideBtn" style="background:none;border:none;padding:0;font-size:13px;font-weight:600;color:var(--blue);cursor:pointer">How to create a GitHub token ▸</button>
+        <div id="ghGuide" style="display:none;margin-top:10px;padding:16px;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius)">
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <span class="gh-step-num">1</span>
+              <div><strong>Open GitHub</strong><br><span style="font-size:13px;color:var(--muted)">Click the button below — it opens the token creation page.</span></div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <span class="gh-step-num">2</span>
+              <div><strong>Configure the token</strong><br><span style="font-size:13px;color:var(--muted)">Pick your website repo under "Repository access", then set <strong>Contents → Read and write</strong> under Permissions.</span></div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <span class="gh-step-num">3</span>
+              <div><strong>Copy &amp; paste</strong><br><span style="font-size:13px;color:var(--muted)">Hit "Generate token", copy the <code>github_pat_…</code> string, and paste it below.</span></div>
+            </div>
+          </div>
+          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="margin-top:14px;display:inline-flex;gap:6px;font-size:14px;text-decoration:none">Create token on GitHub ↗</a>
+        </div>
+      </div>
+
+      <label class="field" id="f_ghRepo"><span class="lbl">GitHub repository</span>
+        <span class="hint">The <code>owner/name</code> of the repo Vercel deploys from.</span>
+        <input type="text" id="ghRepo" placeholder="username/my-website" autocomplete="off" autocapitalize="off" spellcheck="false" oninput="ghValidateDebounce()">
+        <div class="field-err">Enter your repository as owner/name.</div></label>
+      <label class="field" id="f_ghBranch"><span class="lbl">Branch</span>
+        <span class="hint">Usually <code>main</code>.</span>
+        <input type="text" id="ghBranch" placeholder="main" value="main" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <div class="field-err">Enter the branch to commit to.</div></label>
+      <label class="field" id="f_ghToken"><span class="lbl">GitHub token</span>
+        <span class="hint">Fine-grained token with <strong>Contents: Read and write</strong> on this repo. Stored encrypted — never shown again.</span>
+        <input type="password" id="ghToken" placeholder="github_pat_…" autocomplete="new-password" spellcheck="false" oninput="ghValidateDebounce()">
+        <div class="field-err">Enter your GitHub token.</div></label>
+      <div id="ghValidation" class="msg" style="margin-top:-8px;margin-bottom:10px"></div>
+    </div>
   </div>
 
   <div class="help-form" id="helpForm">
@@ -509,8 +547,60 @@ function selectPlatform(id) {
   renderPlatforms();
   $("wpFields").style.display = id==="wordpress" ? "block" : "none";
   $("ghFields").style.display = id==="html" ? "block" : "none";
+  // Reset gate when re-selecting HTML
+  if (id==="html") { $("ghGate").style.display = "block"; $("ghCredsPanel").style.display = "none"; }
   $("helpForm").className = "help-form" + (id==="help" ? " show" : "");
   $("platErr").style.display = "none";
+}
+
+function ghGateAnswer(hasRepo) {
+  if (hasRepo) {
+    $("ghGate").style.display = "none";
+    $("ghCredsPanel").style.display = "block";
+  } else {
+    // Switch to help form with pre-filled message
+    selectPlatform("help");
+    $("helpMessage").value = "I need help setting up a GitHub repository for my website so I can use the HTML / Static publishing option.";
+  }
+}
+
+function toggleGhGuide() {
+  const g = $("ghGuide");
+  const open = g.style.display !== "none";
+  g.style.display = open ? "none" : "block";
+  $("ghGuideBtn").textContent = open ? "How to create a GitHub token ▸" : "How to create a GitHub token ▾";
+}
+
+let ghValTimer = null;
+function ghValidateDebounce() {
+  clearTimeout(ghValTimer);
+  ghValTimer = setTimeout(ghValidateLive, 800);
+}
+async function ghValidateLive() {
+  const repo = ($("ghRepo")||{}).value?.trim();
+  const token = ($("ghToken")||{}).value?.trim();
+  const v = $("ghValidation");
+  if (!repo || !token || !/^[^\/\s]+\/[^\/\s]+$/.test(repo)) { v.className = "msg"; v.textContent = ""; return; }
+  v.className = "msg info show"; v.textContent = "Checking connection…";
+  try {
+    const r = await fetch("https://api.github.com/repos/" + repo, {
+      headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" }
+    });
+    if (r.ok) {
+      const data = await r.json();
+      const canPush = data.permissions?.push === true;
+      if (canPush) { v.className = "msg ok show"; v.textContent = "✓ Connected — can write to " + repo; }
+      else { v.className = "msg warn show"; v.textContent = "⚠ Token can read " + repo + " but may not have write access. Check Contents permission."; }
+    } else if (r.status === 404) {
+      v.className = "msg err show"; v.textContent = "✗ Repo not found, or token doesn't have access to " + repo;
+    } else if (r.status === 401) {
+      v.className = "msg err show"; v.textContent = "✗ Invalid token — check you copied it correctly.";
+    } else {
+      v.className = "msg err show"; v.textContent = "✗ GitHub returned " + r.status;
+    }
+  } catch (e) {
+    v.className = "msg warn show"; v.textContent = "Could not reach GitHub — check your connection.";
+  }
 }
 
 /* ═══ AUTH GATE ═══ */
