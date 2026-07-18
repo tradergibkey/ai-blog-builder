@@ -95,12 +95,36 @@ export default async function handler(req, res) {
       }
     }
 
+    // ---- 3b) Inline images (hotlinked Pexels URLs inserted into body HTML) ----
+    let wpBody = article.body || "";
+    const wpImgWarnings = [];
+    if (process.env.PEXELS_API_KEY) {
+      let wpInline1 = "", wpInline2 = "";
+      const wInlQ1 = article.inlineImageQuery1 || "";
+      const wInlQ2 = article.inlineImageQuery2 || "";
+      if (wInlQ1) {
+        try { wpInline1 = await pexelsImageUrl(wInlQ1); }
+        catch (e) { wpImgWarnings.push("inline1: " + e.message); }
+      }
+      if (wInlQ2) {
+        try { wpInline2 = await pexelsImageUrl(wInlQ2); }
+        catch (e) { wpImgWarnings.push("inline2: " + e.message); }
+      }
+      // De-dupe (can't compare with WP hero URL since that was uploaded, but de-dupe inlines)
+      if (wpInline2 && wpInline2 === wpInline1) { wpInline2 = ""; wpImgWarnings.push("inline2 de-duped"); }
+      const wpImgCount = 1 + (wpInline1 ? 1 : 0) + (wpInline2 ? 1 : 0);
+      if (wpImgCount < 3) {
+        console.warn(`[${body.id}] WP image shortage: ${wpImgCount}/3 images.`, wpImgWarnings.join("; "));
+      }
+      wpBody = injectInlineImages(wpBody, wpInline1, wpInline2, wInlQ1, wInlQ2);
+    }
+
     // ---- 4) Create the post ----
     const publishAs = profile.integration?.defaults?.publishAs || "draft";
 
     const postPayload = {
       title:   article.title,
-      content: article.body,
+      content: wpBody,
       excerpt: article.excerpt || "",
       status:  publishAs,   // "draft" or "publish"
     };
@@ -222,17 +246,47 @@ async function publishToGitHub(req, res, id, profile, body) {
     return res.status(400).json({ error: "Article missing title or body." });
   }
 
-  // ---- 2) Hero image (hotlinked Pexels URL — no upload) ----
+  // ---- 2) Images: hero + 2 inline (all hotlinked Pexels URLs) ----
   let heroImg = "";
-  if (article.imageQuery && process.env.PEXELS_API_KEY) {
-    try {
-      heroImg = await pexelsImageUrl(article.imageQuery);
-    } catch (e) {
-      console.error("Pexels lookup failed (continuing without hero):", e.message);
+  let inlineImg1 = "";
+  let inlineImg2 = "";
+  const imgWarnings = [];
+  const heroQuery   = article.heroImageQuery || article.imageQuery || "";
+  const inlQ1       = article.inlineImageQuery1 || "";
+  const inlQ2       = article.inlineImageQuery2 || "";
+
+  if (process.env.PEXELS_API_KEY) {
+    // Hero
+    if (heroQuery) {
+      try { heroImg = await pexelsImageUrl(heroQuery); }
+      catch (e) { imgWarnings.push("hero: " + e.message); }
     }
+    // Inline 1
+    if (inlQ1) {
+      try { inlineImg1 = await pexelsImageUrl(inlQ1); }
+      catch (e) { imgWarnings.push("inline1: " + e.message); }
+    }
+    // Inline 2
+    if (inlQ2) {
+      try { inlineImg2 = await pexelsImageUrl(inlQ2); }
+      catch (e) { imgWarnings.push("inline2: " + e.message); }
+    }
+    // De-dupe: skip inline if same URL as hero
+    if (inlineImg1 && inlineImg1 === heroImg) { inlineImg1 = ""; imgWarnings.push("inline1 de-duped (same as hero)"); }
+    if (inlineImg2 && inlineImg2 === heroImg) { inlineImg2 = ""; imgWarnings.push("inline2 de-duped (same as hero)"); }
+    if (inlineImg2 && inlineImg2 === inlineImg1) { inlineImg2 = ""; imgWarnings.push("inline2 de-duped (same as inline1)"); }
   }
-  // Fallback: the site's own OG cover so {{HERO_IMG}} is never empty
+  // Fallback hero
   if (!heroImg) heroImg = `${(profile.siteUrl || "").replace(/\/+$/, "")}/img/og-cover.jpg`;
+  // Log shortages
+  const imgCount = 1 + (inlineImg1 ? 1 : 0) + (inlineImg2 ? 1 : 0);
+  if (imgCount < 3) {
+    console.warn(`[${id}] Image shortage: ${imgCount}/3 images found.`, imgWarnings.join("; "));
+  }
+
+  // Inject inline images into article body
+  let articleBody = article.body || "";
+  articleBody = injectInlineImages(articleBody, inlineImg1, inlineImg2, inlQ1, inlQ2);
 
   // ---- 3) Build slug + dates ----
   const slug = slugify(article.title);
@@ -258,7 +312,7 @@ async function publishToGitHub(req, res, id, profile, body) {
     .replace(/\{\{DATE_ISO\}\}/g,     dateIso)
     .replace(/\{\{DATE_DISPLAY\}\}/g, esc(dateDisplay))
     .replace(/\{\{HERO_IMG\}\}/g,     esc(heroImg))
-    .replace(/\{\{CONTENT\}\}/g,      article.body); // body is trusted HTML from generate.js
+    .replace(/\{\{CONTENT\}\}/g,      articleBody); // body with inline images injected
 
   // ---- 5) Commit the post file ----
   const postPath = `blog/posts/${slug}.html`;
@@ -383,6 +437,42 @@ function injectCard(indexHtml, p) {
   }
 
   return before + middle + after;
+}
+
+// Inject inline images into the article body HTML.
+// Strategy: if Claude placed {{INLINE_IMG_1/2}} markers, replace them.
+// Fallback: if markers are missing, inject after the 1st and 2nd </h2> closings.
+// If no image URL is available for a slot, the marker is simply removed (no broken img).
+function injectInlineImages(body, img1, img2, alt1, alt2) {
+  const hasMarker1 = body.includes("{{INLINE_IMG_1}}");
+  const hasMarker2 = body.includes("{{INLINE_IMG_2}}");
+
+  const tag1 = img1 ? `<img src="${esc(img1)}" alt="${esc(alt1 || "")}" loading="lazy">` : "";
+  const tag2 = img2 ? `<img src="${esc(img2)}" alt="${esc(alt2 || "")}" loading="lazy">` : "";
+
+  if (hasMarker1 || hasMarker2) {
+    // Claude placed markers — use them
+    body = body.replace("{{INLINE_IMG_1}}", tag1);
+    body = body.replace("{{INLINE_IMG_2}}", tag2);
+  } else {
+    // Fallback: inject after 1st and 2nd </h2>
+    let h2count = 0;
+    body = body.replace(/<\/h2>/gi, (match) => {
+      h2count++;
+      if (h2count === 1 && tag1) return match + "\n" + tag1;
+      if (h2count === 2 && tag2) return match + "\n" + tag2;
+      return match;
+    });
+    // If only 1 H2 existed and we have tag2, try after 1st </h3>
+    if (h2count < 2 && tag2) {
+      let h3done = false;
+      body = body.replace(/<\/h3>/i, (match) => {
+        if (!h3done) { h3done = true; return match + "\n" + tag2; }
+        return match;
+      });
+    }
+  }
+  return body;
 }
 
 // ---- Text/encoding utilities ----
