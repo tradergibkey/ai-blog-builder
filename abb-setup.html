@@ -65,7 +65,7 @@
 
     <hr style="border:0;border-top:1px solid var(--line);margin:28px 0 20px">
     <h2 style="font-size:16px;margin:0 0 10px;color:var(--blue)">Quick publish test</h2>
-    <p class="muted" style="margin-bottom:12px">Generate an article and publish it to a tenant's WordPress as a draft.</p>
+    <p class="muted" style="margin-bottom:12px">Generate an article and publish it to a tenant's site.</p>
     <div style="display:flex;gap:10px;margin-bottom:8px">
       <input id="pubId" type="text" placeholder="tenant ID (domain)" style="flex:1">
     </div>
@@ -178,7 +178,15 @@
       const id = $("pubId").value.trim();
       const topic = $("pubTopic").value.trim();
       if (!id || !topic) { const s=$("pubStatus"); s.className="status show err"; s.textContent="Enter tenant ID and topic."; return; }
-      if (!confirm("Generate an article about \"" + topic + "\" and publish to " + id + "'s WordPress?")) return;
+      // Look up integration type for accurate confirm text
+      let target = id;
+      const prof = await call("GET", { url: ENDPOINT + "?id=" + encodeURIComponent(id) });
+      if (prof && prof.data.ok) {
+        const intType = prof.data.profile?.integration?.type || "wordpress";
+        if (intType === "github-static") target = id + "'s GitHub repo";
+        else if (intType === "wordpress") target = id + "'s WordPress";
+      }
+      if (!confirm("Generate an article about \"" + topic + "\" and publish to " + target + "?")) return;
       busy(true);
       const s=$("pubStatus"); s.className="status show info"; s.textContent="Generating article and publishing — this takes 30-60 seconds…";
       $("pubOut").textContent="";
