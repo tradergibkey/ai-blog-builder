@@ -5,110 +5,164 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>AI Blog Builder — Dashboard</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232563eb'/%3E%3Ctext x='50' y='68' font-size='46' font-weight='700' font-family='Arial,sans-serif' fill='white' text-anchor='middle'%3EAB%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23E37535'/%3E%3Cstop offset='1' stop-color='%239A133C'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='Arial,sans-serif' font-size='30' font-weight='800' fill='white' text-anchor='middle'%3EAB%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@700;800&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap">
 <style>
-:root{--blue:#2563eb;--blue-l:#dbeafe;--blue-d:#1e40af;--ink:#0f172a;--ink-2:#334155;--muted:#64748b;
---faint:#94a3b8;--line:#e2e8f0;--bg:#f8fafc;--card:#fff;--ok:#10b981;--ok-bg:#ecfdf5;--warn:#f59e0b;
---warn-bg:#fffbeb;--err:#ef4444;--err-bg:#fef2f2;--radius:12px;--shadow:0 4px 24px rgba(15,23,42,.07)}
+:root{
+  --bg:#F6F5FB; --bg-alt:#EFEDF4; --surface:#FFFFFF;
+  --ink:#141414; --ink-soft:#4A4A4A; --muted:#8A8694; --line:#E5E2E9;
+  --violet:#9A133C; --magenta:#C73340; --orange:#E37535;
+  --grad:linear-gradient(120deg,#E37535 0%,#C73340 55%,#9A133C 100%);
+  --grad-soft:linear-gradient(120deg,rgba(227,117,53,.12),rgba(154,19,60,.10));
+  --ok:#15803D; --ok-bg:#E7F5EC; --warn:#B45309; --warn-bg:#FEF3C7; --err:#B91C1C; --err-bg:#FDECEA;
+  --radius:18px; --radius-sm:12px;
+  --shadow:0 10px 30px rgba(20,20,20,.08); --shadow-lg:0 24px 60px rgba(20,20,20,.14);
+  --font-display:'Sora',system-ui,sans-serif; --font-body:'Inter',system-ui,sans-serif;
+  --font-mono:'Space Mono',ui-monospace,monospace;
+}
 *,*::before,*::after{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-h1,h2,h3{margin:0;line-height:1.3}p{margin:0}a{color:var(--blue)}
-.shell{max-width:1000px;margin:0 auto;padding:32px 20px 64px}
-.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px}
-.topbar h1{font-size:24px}
-.topbar .links a{font-size:14px;font-weight:600;margin-left:16px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 var(--font-body);-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--font-display);margin:0;line-height:1.2;letter-spacing:-.01em}
+p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:underline}
 
-/* Gate */
-.gate{text-align:center;padding:80px 0}
-.gate h1{font-size:24px;margin-bottom:6px}
-.gate p{color:var(--muted);font-size:15px;margin-bottom:24px}
-.gate-row{display:flex;gap:10px;max-width:440px;margin:0 auto}
-.gate-row input{flex:1;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);font-size:15px}
-.gate-row input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
-.gate-row button{padding:12px 20px;border:0;border-radius:var(--radius);background:var(--blue);color:#fff;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap}
+/* ═══ Layout: sidebar + main ═══ */
+.app{display:flex;min-height:100vh}
+.sidebar{width:230px;min-width:230px;background:var(--surface);border-right:1px solid var(--line);padding:24px 14px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
+.side-logo{font-family:var(--font-display);font-weight:800;font-size:18px;padding:0 12px 20px;color:var(--ink)}
+.side-logo .dot{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;font-weight:600;font-size:14px;color:var(--ink-soft);cursor:pointer;border:none;background:none;text-align:left;width:100%;font-family:var(--font-body)}
+.nav-item:hover{background:var(--bg-alt);color:var(--ink);text-decoration:none}
+.nav-item.active{background:var(--grad-soft);color:var(--violet)}
+.nav-item .ico{width:18px;text-align:center}
+.side-sep{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding:18px 12px 6px}
+.main{flex:1;padding:32px 36px 64px;max-width:1160px}
 
-.msg{font-size:14px;padding:10px 14px;border-radius:10px;margin-top:12px;display:none}
+.topline{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:26px}
+.topline h1{font-size:26px}
+.live-pill{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;border-radius:999px;background:var(--ok-bg);color:var(--ok);font-weight:700;font-size:13px}
+.live-pill::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok)}
+
+/* ═══ Buttons (emlektabla pattern) ═══ */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:14px;font-weight:700;font-size:14.5px;font-family:var(--font-body);cursor:pointer;border:none;transition:transform .15s,box-shadow .15s,filter .15s;text-decoration:none}
+.btn:hover{transform:translateY(-2px);text-decoration:none}
+.btn-primary{background:var(--grad);color:#fff;box-shadow:var(--shadow)}
+.btn-primary:hover{box-shadow:var(--shadow-lg);filter:brightness(1.05)}
+.btn-outline{background:var(--surface);color:var(--ink);border:1.5px solid var(--line)}
+.btn-outline:hover{border-color:var(--violet);color:var(--violet)}
+.btn-sm{padding:9px 16px;font-size:13.5px;border-radius:11px}
+
+/* ═══ Gate ═══ */
+.gate{max-width:460px;margin:12vh auto 0;text-align:center;padding:0 20px}
+.gate h1{font-size:26px;margin-bottom:8px}
+.gate .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.gate p{color:var(--muted);margin-bottom:26px}
+.gate-row{display:flex;gap:10px}
+.gate-row input{flex:1;padding:13px 16px;border:1.5px solid var(--line);border-radius:14px;font-size:15px;font-family:var(--font-mono);background:var(--surface)}
+.gate-row input:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px rgba(199,51,64,.14)}
+
+.msg{font-size:14px;padding:11px 15px;border-radius:12px;margin-top:14px;display:none;font-weight:600}
 .msg.show{display:block}
-.msg.ok{background:var(--ok-bg);color:#065f46}.msg.err{background:var(--err-bg);color:#991b1b}
-.msg.info{background:var(--blue-l);color:var(--blue-d)}.msg.warn{background:var(--warn-bg);color:#92400e}
+.msg.ok{background:var(--ok-bg);color:var(--ok)}.msg.err{background:var(--err-bg);color:var(--err)}
+.msg.info{background:var(--grad-soft);color:var(--violet)}.msg.warn{background:var(--warn-bg);color:var(--warn)}
 
-/* Tenant cards */
-.tenants{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
-.tcard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow);cursor:pointer;transition:transform .15s,box-shadow .15s}
-.tcard:hover{transform:translateY(-3px);box-shadow:0 8px 30px rgba(15,23,42,.10)}
-.tcard h3{font-size:17px;margin-bottom:4px}
-.tcard .url{font-size:13px;color:var(--muted);margin-bottom:12px;word-break:break-all}
-.badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em}
-.badge.wp{background:#e0e7ff;color:#3730a3}.badge.gh{background:#1e293b;color:#fff}
-.badge.active{background:var(--ok-bg);color:#065f46}.badge.paused{background:var(--warn-bg);color:#92400e}
-.tcard-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+/* ═══ Panels & cards ═══ */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px;margin-bottom:22px;box-shadow:0 4px 16px rgba(20,20,20,.05)}
+.panel-title{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:800;font-size:16px;margin-bottom:18px}
+.panel-title .pico{width:30px;height:30px;border-radius:9px;background:var(--grad-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
 
-/* Detail view */
-.back{background:none;border:0;color:var(--blue);font-size:14px;font-weight:600;cursor:pointer;padding:0;margin-bottom:16px}
-.detail-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:20px}
-.detail-head h2{font-size:22px}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:24px}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
-.stat .n{font-size:24px;font-weight:800;color:var(--ink)}
-.stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+.tenants{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:18px}
+.tcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:24px;cursor:pointer;transition:transform .2s,box-shadow .2s;position:relative;overflow:hidden}
+.tcard::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;background:var(--grad)}
+.tcard:hover{transform:translateY(-4px);box-shadow:var(--shadow)}
+.tcard h3{font-size:17px;margin-bottom:3px}
+.tcard .url{font-family:var(--font-mono);font-size:12px;color:var(--muted);margin-bottom:14px;word-break:break-all}
+.badge{display:inline-block;font-size:11px;font-weight:700;padding:4px 11px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em}
+.badge.gh{background:#1E1C24;color:#F0D48A}
+.badge.wp{background:#E0E7FF;color:#3730A3}
+.badge.active{background:var(--ok-bg);color:var(--ok)}
+.badge.paused{background:var(--warn-bg);color:var(--warn)}
+.tcard-meta{display:flex;gap:8px;flex-wrap:wrap}
 
-.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:20px;box-shadow:var(--shadow)}
-.panel h3{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:16px}
+/* ═══ Stats row ═══ */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:22px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;position:relative;overflow:hidden}
+.stat .n{font-family:var(--font-display);font-size:30px;font-weight:800;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.stat .l{font-family:var(--font-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.16em;margin-top:4px}
 
-/* Calendar */
-.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
-.cal .dow{font-size:11px;font-weight:700;color:var(--faint);text-align:center;text-transform:uppercase;padding:4px 0}
-.cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:8px;padding:4px;font-size:12px;position:relative;min-height:44px}
+/* ═══ Detail head ═══ */
+.back{background:none;border:0;color:var(--violet);font-size:14px;font-weight:700;cursor:pointer;padding:0;margin-bottom:18px;font-family:var(--font-body)}
+.detail-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:22px}
+.detail-head h2{font-size:23px}
+
+/* ═══ Calendar ═══ */
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.cal .dow{font-family:var(--font-mono);font-size:10px;font-weight:700;color:var(--muted);text-align:center;text-transform:uppercase;letter-spacing:.1em;padding:5px 0}
+.cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:10px;padding:5px 6px;font-size:12px;min-height:48px;background:var(--surface)}
 .cal .day.empty{border:none;background:transparent}
-.cal .day .dn{color:var(--faint);font-size:11px}
-.cal .day.has{background:var(--blue-l);border-color:var(--blue)}
-.cal .day.today{box-shadow:0 0 0 2px var(--blue)}
-.cal .day .topic{font-size:9px;line-height:1.2;color:var(--blue-d);margin-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.cal-nav button{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:600;font-size:14px}
-.cal-nav .mlabel{font-weight:700}
+.cal .day .dn{color:var(--muted);font-size:11px;font-weight:600}
+.cal .day.has{background:var(--grad-soft);border-color:rgba(154,19,60,.35)}
+.cal .day.today{box-shadow:0 0 0 2px var(--violet)}
+.cal .day .topic{font-size:9px;line-height:1.25;color:var(--violet);margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-weight:600}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.cal-nav button{background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:7px 14px;cursor:pointer;font-weight:700;font-size:14px;color:var(--ink)}
+.cal-nav button:hover{border-color:var(--violet);color:var(--violet)}
+.cal-nav .mlabel{font-family:var(--font-display);font-weight:800;font-size:15px}
 
-/* History list */
+/* ═══ History ═══ */
 .hist{list-style:none;padding:0;margin:0}
-.hist li{padding:12px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.hist li{padding:13px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
 .hist li:last-child{border-bottom:none}
-.hist .ht{font-size:14px;font-weight:600;color:var(--ink)}
-.hist .hd{font-size:12px;color:var(--muted);white-space:nowrap}
-.hist .hstatus{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--ok-bg);color:#065f46}
+.hist .ht{font-size:14px;font-weight:600}
+.hist .ht a{color:var(--ink)}.hist .ht a:hover{color:var(--violet);text-decoration:none}
+.hist .hd{font-family:var(--font-mono);font-size:11.5px;color:var(--muted);white-space:nowrap;padding-top:2px}
 
-.empty{color:var(--muted);font-size:14px;text-align:center;padding:30px}
-.spinner{text-align:center;padding:40px;color:var(--muted)}
+.empty{color:var(--muted);font-size:14px;text-align:center;padding:34px}
+.spinner{text-align:center;padding:44px;color:var(--muted)}
+
+@media(max-width:760px){
+  .sidebar{display:none}
+  .main{padding:22px 16px 48px}
+}
 </style>
 </head>
 <body>
-<div class="shell">
 
-  <!-- GATE -->
-  <div id="gate" class="gate">
-    <h1>AI Blog Builder — Dashboard</h1>
-    <p>Enter your operator secret to view all tenants.</p>
-    <div class="gate-row">
-      <input id="gateKey" type="password" placeholder="ABB_APP_SECRET" onkeydown="if(event.key==='Enter')verifyGate()">
-      <button id="gateBtn" onclick="verifyGate()">Enter</button>
-    </div>
-    <div id="gateMsg" class="msg"></div>
+<!-- ═══ GATE ═══ -->
+<div id="gate" class="gate">
+  <h1>AI Blog Builder <span class="grad-text">Dashboard</span></h1>
+  <p>Enter your operator secret to view all tenants.</p>
+  <div class="gate-row">
+    <input id="gateKey" type="password" placeholder="ABB_APP_SECRET" onkeydown="if(event.key==='Enter')verifyGate()">
+    <button class="btn btn-primary" id="gateBtn" onclick="verifyGate()">Enter</button>
   </div>
+  <div id="gateMsg" class="msg"></div>
+</div>
 
-  <!-- MAIN (hidden until authed) -->
-  <div id="main" style="display:none">
-    <div class="topbar">
-      <h1>Dashboard</h1>
-      <div class="links">
-        <a href="/app/index.html">+ New tenant</a>
-        <a href="/abb-setup.html">Setup</a>
-        <a href="#" onclick="loadTenants();return false">↻ Refresh</a>
-      </div>
-    </div>
+<!-- ═══ APP ═══ -->
+<div id="app" class="app" style="display:none">
+  <aside class="sidebar">
+    <div class="side-logo">AI Blog<span class="dot">Builder</span></div>
+    <button class="nav-item active" onclick="showList()"><span class="ico">▦</span> Overview</button>
+    <div class="side-sep">Tools</div>
+    <a class="nav-item" href="/app/index.html"><span class="ico">＋</span> New tenant</a>
+    <a class="nav-item" href="/abb-setup.html"><span class="ico">⚙</span> Setup page</a>
+    <button class="nav-item" onclick="loadTenants()"><span class="ico">↻</span> Refresh</button>
+  </aside>
 
+  <main class="main">
     <!-- LIST VIEW -->
     <div id="listView">
-      <div id="tenantList" class="spinner">Loading tenants…</div>
+      <div class="topline">
+        <h1>Overview</h1>
+        <span class="live-pill">Live</span>
+      </div>
+      <div id="globalStats" class="stats"></div>
+      <div class="panel">
+        <div class="panel-title"><span class="pico">▦</span> Tenants</div>
+        <div id="tenantList" class="spinner">Loading tenants…</div>
+      </div>
     </div>
 
     <!-- DETAIL VIEW -->
@@ -116,18 +170,17 @@ h1,h2,h3{margin:0;line-height:1.3}p{margin:0}a{color:var(--blue)}
       <button class="back" onclick="showList()">← All tenants</button>
       <div id="detailBody"><div class="spinner">Loading…</div></div>
     </div>
-  </div>
-
+  </main>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const API = "/api/app";
 let SECRET = "";
+let TENANTS = [];
 
 async function api(method, path) {
-  const headers = { "x-app-secret": SECRET };
-  const r = await fetch(API + path, { method, headers });
+  const r = await fetch(API + path, { method, headers: { "x-app-secret": SECRET } });
   const data = await r.json().catch(() => ({}));
   return { ok: r.ok, status: r.status, data };
 }
@@ -141,8 +194,9 @@ async function verifyGate() {
   $("gateBtn").disabled = false; $("gateBtn").textContent = "Enter";
   if (r.ok && r.data.ok) {
     $("gate").style.display = "none";
-    $("main").style.display = "block";
-    renderTenants(r.data.tenants || []);
+    $("app").style.display = "flex";
+    TENANTS = r.data.tenants || [];
+    renderTenants(TENANTS);
   } else {
     SECRET = "";
     showMsg("gateMsg","err", r.data.error || "Wrong secret or server error.");
@@ -156,11 +210,18 @@ async function loadTenants() {
   $("tenantList").className = "spinner";
   $("tenantList").textContent = "Loading tenants…";
   const r = await api("GET", "/tenants");
-  if (r.ok && r.data.ok) renderTenants(r.data.tenants || []);
+  if (r.ok && r.data.ok) { TENANTS = r.data.tenants || []; renderTenants(TENANTS); }
   else { $("tenantList").className=""; $("tenantList").innerHTML = '<div class="empty">Could not load tenants.</div>'; }
 }
 
 function renderTenants(tenants) {
+  // Global stats
+  const active = tenants.filter(t => t.status === "active").length;
+  $("globalStats").innerHTML = `
+    <div class="stat"><div class="n">${tenants.length}</div><div class="l">Tenants</div></div>
+    <div class="stat"><div class="n">${active}</div><div class="l">Active</div></div>
+    <div class="stat"><div class="n">${tenants.length - active}</div><div class="l">Paused</div></div>`;
+
   const el = $("tenantList");
   if (!tenants.length) { el.className=""; el.innerHTML = '<div class="empty">No tenants yet. <a href="/app/index.html">Add your first one →</a></div>'; return; }
   el.className = "tenants";
@@ -174,7 +235,7 @@ function renderTenants(tenants) {
     </div>`).join("");
 }
 
-function showList() { $("listView").style.display="block"; $("detailView").style.display="none"; }
+function showList() { $("listView").style.display="block"; $("detailView").style.display="none"; calRef=null; }
 
 async function openTenant(encId) {
   const id = decodeURIComponent(encId);
@@ -182,7 +243,6 @@ async function openTenant(encId) {
   $("detailView").style.display = "block";
   $("detailBody").innerHTML = '<div class="spinner">Loading '+escapeHtml(id)+'…</div>';
 
-  // Fetch profile + queue in parallel (both existing endpoints)
   const [profRes, queueRes] = await Promise.all([
     api("GET", "/tenants?id=" + encodeURIComponent(id)),
     api("GET", "/queue?id=" + encodeURIComponent(id)),
@@ -201,30 +261,30 @@ function renderDetail(id, profile, q) {
   const intBadge = intType==="github-static" ? '<span class="badge gh">GitHub</span>' : '<span class="badge wp">WordPress</span>';
   const nextItem = queue.find(e => e.date) || queue[0];
   const nextDate = nextItem?.date || "—";
+  const linking = profile.authority?.enabled ? "On" : "Off";
 
   let html = `
     <div class="detail-head">
       <h2>${escapeHtml(profile.siteName || id)}</h2>
-      <div>${intBadge} <span class="badge ${profile.status==='active'?'active':'paused'}">${escapeHtml(profile.status||'active')}</span></div>
+      <div style="display:flex;gap:8px;align-items:center">${intBadge}
+        <span class="badge ${profile.status==='active'?'active':'paused'}">${escapeHtml(profile.status||'active')}</span></div>
     </div>
     <div class="stats">
       <div class="stat"><div class="n">${queue.length}</div><div class="l">Queued</div></div>
       <div class="stat"><div class="n">${history.length}</div><div class="l">Published</div></div>
-      <div class="stat"><div class="n">${nextDate}</div><div class="l">Next up</div></div>
-      <div class="stat"><div class="n">${escapeHtml(profile.primaryLanguage||'—').toUpperCase()}</div><div class="l">Language</div></div>
+      <div class="stat"><div class="n" style="font-size:19px;padding-top:8px">${nextDate}</div><div class="l">Next up</div></div>
+      <div class="stat"><div class="n">${escapeHtml((profile.primaryLanguage||'—').toUpperCase())}</div><div class="l">Language</div></div>
+      <div class="stat"><div class="n" style="font-size:22px;padding-top:5px">${linking}</div><div class="l">Int. links</div></div>
     </div>`;
 
-  // Plan status
   if (plan) {
     const ps = plan.status || "—";
-    html += `<div class="msg info show" style="margin-bottom:20px">Today's plan: <strong>${escapeHtml(ps)}</strong>${plan.target?` · target ${escapeHtml(plan.target)}`:""}${plan.topic?` · ${escapeHtml(plan.topic)}`:""}</div>`;
+    html += `<div class="msg info show" style="margin:0 0 22px">Today's plan: <strong>${escapeHtml(ps)}</strong>${plan.target?` · target ${escapeHtml(plan.target)}`:""}${plan.topic?` · ${escapeHtml(plan.topic)}`:""}</div>`;
   }
 
-  // Calendar
-  html += `<div class="panel"><h3>Content calendar</h3><div id="calMount"></div></div>`;
+  html += `<div class="panel"><div class="panel-title"><span class="pico">▤</span> Content calendar</div><div id="calMount"></div></div>`;
 
-  // History
-  html += `<div class="panel"><h3>Recent posts</h3>`;
+  html += `<div class="panel"><div class="panel-title"><span class="pico">✓</span> Recent posts</div>`;
   if (!history.length) html += `<div class="empty">No posts published yet.</div>`;
   else {
     html += `<ul class="hist">` + history.slice(0,15).map(h => {
@@ -243,12 +303,11 @@ function renderDetail(id, profile, q) {
   renderCalendar(queue);
 }
 
-// ---- Calendar (queue items by date) ----
-let calRef = null; // {y, m}
+/* ─── Calendar ─── */
+let calRef = null;
 function renderCalendar(queue) {
   const byDate = {};
   queue.forEach(e => { if (e.date) (byDate[e.date] = byDate[e.date] || []).push(e); });
-  // Start at the month of the earliest queued date, or current month
   const dates = Object.keys(byDate).sort();
   const first = dates[0] || new Date().toISOString().slice(0,10);
   if (!calRef) { const [y,m] = first.split("-").map(Number); calRef = { y, m:m-1 }; }
@@ -257,10 +316,11 @@ function renderCalendar(queue) {
 
 function drawCalendar(byDate) {
   const mount = $("calMount");
+  if (!mount) return;
   const y = calRef.y, m = calRef.m;
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const first = new Date(Date.UTC(y, m, 1));
-  const startDow = (first.getUTCDay() + 6) % 7; // Monday=0
+  const startDow = (first.getUTCDay() + 6) % 7;
   const daysInMonth = new Date(Date.UTC(y, m+1, 0)).getUTCDate();
   const todayStr = new Date().toISOString().slice(0,10);
 
