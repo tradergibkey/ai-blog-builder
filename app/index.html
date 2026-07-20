@@ -433,6 +433,12 @@ code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
     <span class="hint" style="display:block;font-size:12px;color:var(--faint)">When off, articles are saved as drafts for your review first.</span></div>
   </div>
 
+  <div class="toggle-row" style="margin-top:16px">
+    <label class="toggle"><input type="checkbox" id="authorityToggle"><span class="slider"></span></label>
+    <div><span class="toggle-label">Smart internal linking</span>
+    <span class="hint" style="display:block;font-size:12px;color:var(--faint)">Automatically links new articles to your earlier posts for better SEO. Needs 3+ published articles to start.</span></div>
+  </div>
+
   <div class="btn-row">
     <button class="btn btn-ghost" onclick="goStep(3)">← Back</button>
     <button class="btn btn-primary" onclick="tryStep(5)">Review →</button>
@@ -872,6 +878,7 @@ function renderReview(){
     ["Timezone",esc($("timezone").value)],
     ["Publish window",$("windowStart").value+":00 – "+$("windowEnd").value+":00"],
     ["Publishing",autoLabel],
+    ["Internal linking",$("authorityToggle").checked?"Enabled":"Off"],
   ];
   $("reviewSummary").innerHTML=rows.map(([k,v])=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
 }
@@ -915,6 +922,7 @@ async function saveProfile(){
     timezone:$("timezone").value,
     publishWindow:{startHour:parseInt($("windowStart").value),endHour:parseInt($("windowEnd").value)},
     cadence:cadence,
+    authority:{enabled:$("authorityToggle").checked,features:[]},
     referralSource:$("referral").value==="other"?("other: "+$("referralOther").value.trim()):$("referral").value,
   };
 
