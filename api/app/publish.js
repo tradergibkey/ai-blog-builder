@@ -21,7 +21,7 @@
 
 import { getProfile } from "./_profile.js";
 import { getSecret } from "./_secrets.js";
-import { addHistory } from "./_store.js";
+import { addHistory, getHistory } from "./_store.js";
 
 export const config = { maxDuration: 180 };
 
@@ -117,6 +117,16 @@ export default async function handler(req, res) {
         console.warn(`[${body.id}] WP image shortage: ${wpImgCount}/3 images.`, wpImgWarnings.join("; "));
       }
       wpBody = injectInlineImages(wpBody, wpInline1, wpInline2, wInlQ1, wInlQ2);
+    }
+
+    // Internal links (Phase 5a) — opt-in via profile.authority.enabled, needs history
+    if (profile.authority?.enabled) {
+      try {
+        const history = await getHistory(id);
+        wpBody = await addInternalLinks(wpBody, history, article.title);
+      } catch (e) {
+        console.error(`[${id}] Internal linking failed (continuing):`, e.message);
+      }
     }
 
     // ---- 4) Create the post ----
@@ -288,6 +298,16 @@ async function publishToGitHub(req, res, id, profile, body) {
   let articleBody = article.body || "";
   articleBody = injectInlineImages(articleBody, inlineImg1, inlineImg2, inlQ1, inlQ2);
 
+  // Internal links (Phase 5a) — opt-in via profile.authority.enabled, needs history
+  if (profile.authority?.enabled) {
+    try {
+      const history = await getHistory(id);
+      articleBody = await addInternalLinks(articleBody, history, article.title);
+    } catch (e) {
+      console.error(`[${id}] Internal linking failed (continuing):`, e.message);
+    }
+  }
+
   // ---- 3) Build slug + dates ----
   const slug = slugify(article.title);
   const now  = new Date();
@@ -437,6 +457,127 @@ function injectCard(indexHtml, p) {
   }
 
   return before + middle + after;
+}
+
+// =============================================================================
+//  INTERNAL LINKING (Phase 5a)
+// -----------------------------------------------------------------------------
+//  Given a new article body + the tenant's publish history, ask Claude to pick
+//  2-3 genuinely relevant prior posts and the exact phrases in THIS article to
+//  hyperlink to them. Insert those links. Never blocks publish on failure.
+//  Gated by profile.authority.enabled and history.length >= 3 (checked by caller
+//  for enabled; this function checks the count).
+// =============================================================================
+async function addInternalLinks(body, history, currentTitle) {
+  const pool = (history || []).filter(h => h.url && h.title && h.title !== currentTitle);
+  if (pool.length < 3) return body; // not enough to link to yet
+  if (!process.env.ANTHROPIC_API_KEY) return body;
+
+  // Build the candidate list (cap at 40 most recent to keep prompt lean)
+  const candidates = pool.slice(0, 40).map((h, i) => ({
+    n: i + 1, title: h.title, url: h.url,
+  }));
+
+  const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
+  const tool = {
+    name: "suggest_links",
+    description: "Suggest 2-3 internal links from the new article to prior posts.",
+    input_schema: {
+      type: "object",
+      properties: {
+        links: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              anchorPhrase: { type: "string", description: "An EXACT phrase copied verbatim from the new article body that should become the link. Must appear word-for-word in the article." },
+              linkToN:      { type: "integer", description: "The number (n) of the prior post to link to." },
+            },
+            required: ["anchorPhrase", "linkToN"],
+          },
+        },
+      },
+      required: ["links"],
+    },
+  };
+
+  // Strip HTML tags to give Claude clean text (it still returns phrases that exist in body)
+  const plainText = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 6000);
+  const list = candidates.map(c => `${c.n}. ${c.title}`).join("\n");
+
+  const system = `You add internal links between blog posts on the same website. You will receive a NEW article and a list of PRIOR posts. Choose 2-3 prior posts that are genuinely topically related to the new article. For each, pick a short exact phrase (2-5 words) from the new article that would make a natural, relevant anchor for a link to that prior post.
+
+RULES:
+- The anchorPhrase MUST appear word-for-word in the new article text.
+- Choose phrases that are topically relevant to the post being linked (not random words).
+- Do NOT link the title. Pick phrases from the body.
+- Only suggest a link if it's genuinely helpful to the reader. 2-3 links max. Fewer is fine.
+- Each phrase must be different and link to a different prior post.`;
+
+  const userMsg = `NEW ARTICLE (plain text):
+${plainText}
+
+PRIOR POSTS (pick 2-3 relevant ones to link to):
+${list}
+
+Call suggest_links.`;
+
+  let suggestions = [];
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: MODEL, max_tokens: 1000, system,
+        messages: [{ role: "user", content: userMsg }],
+        tools: [tool], tool_choice: { type: "tool", name: "suggest_links" },
+      }),
+    });
+    if (!r.ok) throw new Error(`Claude ${r.status}`);
+    const d = await r.json();
+    const block = (d.content || []).find(b => b.type === "tool_use");
+    suggestions = (block && block.input && block.input.links) || [];
+  } catch (e) {
+    console.error("Internal link generation failed:", e.message);
+    return body; // fail safe
+  }
+
+  // Apply the links
+  let linked = 0;
+  for (const s of suggestions) {
+    if (linked >= 3) break;
+    const cand = candidates.find(c => c.n === s.linkToN);
+    if (!cand || !s.anchorPhrase) continue;
+    const href = urlToPath(cand.url);
+    const res = linkPhrase(body, s.anchorPhrase, href);
+    if (res.linked) { body = res.body; linked++; }
+  }
+  return body;
+}
+
+// Insert a link around the FIRST visible-text occurrence of `phrase`.
+// Skips occurrences inside a tag or already inside an <a>.
+function linkPhrase(body, phrase, href) {
+  if (!phrase || !href) return { body, linked: false };
+  const idx = body.indexOf(phrase);
+  if (idx === -1) return { body, linked: false };
+  const before = body.slice(0, idx);
+  if (before.lastIndexOf("<") > before.lastIndexOf(">")) return { body, linked: false }; // inside a tag
+  if (before.lastIndexOf("<a ") > before.lastIndexOf("</a>")) return { body, linked: false }; // inside a link
+  const link = `<a href="${esc(href)}">${phrase}</a>`;
+  return { body: body.slice(0, idx) + link + body.slice(idx + phrase.length), linked: true };
+}
+
+// Full URL (or domain/path) → path only. "emlektabla.net/blog/posts/x" → "/blog/posts/x"
+function urlToPath(url) {
+  try {
+    const withProto = String(url).startsWith("http") ? String(url) : "https://" + url;
+    return new URL(withProto).pathname;
+  } catch { return url; }
 }
 
 // Inject inline images into the article body HTML.
