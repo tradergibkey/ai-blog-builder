@@ -25,16 +25,23 @@
 //      the plan is marked done instead of publishing twice.
 //    • Tenants with an unsupported integration type, or missing credentials
 //      for their type, are skipped.
+//    • VELOCITY GATE (Phase 7): daily cap enforced via publish-policy.js —
+//      new domains ramp up slowly, established tenants capped per config.
 //
 //  AUTH:  ?key=SECRET  or  x-app-secret header  or  Authorization: Bearer
 //         Accepts ABB_CRON_SECRET (recommended, optional) or ABB_APP_SECRET.
 // =============================================================================
 
-import { listTenants, getQueue, saveQueue, getPlan, savePlan, getHistory } from "./_store.js";
+import { listTenants, getQueue, saveQueue, getPlan, savePlan, getHistory, getStr, setStr } from "./_store.js";
 import { getProfile } from "./_profile.js";
 import { hasSecret } from "./_secrets.js";
+import { canPublishNow, recordPublish } from "../../lib/publish-policy.js";
 
 export const config = { maxDuration: 300 };
+
+// KV wrappers for publish-policy (strip "abb:" prefix — _store adds its own)
+const kvGet = (k) => getStr(k.startsWith("abb:") ? k.slice(4) : k);
+const kvSet = (k, v, opts) => setStr(k.startsWith("abb:") ? k.slice(4) : k, v, opts);
 
 export default async function handler(req, res) {
   // ---- Auth ----
@@ -104,6 +111,19 @@ export default async function handler(req, res) {
             await savePlan(t.id, { date: now.date, status: "skipped", reason: "after window" });
             r.action = "skipped"; r.reason = "after window — tomorrow"; results.push(r); continue;
           }
+
+          // ── VELOCITY GATE: check daily cap before even planning ──
+          const velCheck = await canPublishNow({
+            tenant: t.id,
+            createdAtISO: t.createdAt || "2020-01-01",
+            queueTarget: profile.queueTarget || 2,
+            kvGet,
+          });
+          if (!velCheck.allowed) {
+            await savePlan(t.id, { date: now.date, status: "skipped", reason: velCheck.reason });
+            r.action = "skipped"; r.reason = velCheck.reason; results.push(r); continue;
+          }
+
           const pick = nextDue(queue, now.date);
           if (!pick) {
             await savePlan(t.id, { date: now.date, status: "empty" });
@@ -129,6 +149,19 @@ export default async function handler(req, res) {
             r.action = "already-published"; results.push(r); continue;
           }
 
+          // ── VELOCITY GATE: re-check at publish time (cap may have been
+          //    reached by a manual publish since planning) ──
+          const velCheck = await canPublishNow({
+            tenant: t.id,
+            createdAtISO: t.createdAt || "2020-01-01",
+            queueTarget: profile.queueTarget || 2,
+            kvGet,
+          });
+          if (!velCheck.allowed) {
+            plan.status = "skipped"; plan.note = velCheck.reason; await savePlan(t.id, plan);
+            r.action = "skipped"; r.reason = velCheck.reason; results.push(r); continue;
+          }
+
           // Claim BEFORE the slow call
           if (plan.status === "pending") {
             plan.status = "publishing"; plan.claimed_at = new Date().toISOString();
@@ -147,6 +180,12 @@ export default async function handler(req, res) {
             plan.status = "done"; plan.postUrl = pub.post?.url; await savePlan(t.id, plan);
             queue = (await getQueue(t.id)).filter(e => e.id !== plan.queueId);
             await saveQueue(t.id, queue);
+
+            // ── VELOCITY: record successful publish in daily counter ──
+            await recordPublish({ tenant: t.id, kvGet, kvSet }).catch(
+              e => console.error(`[${t.id}] velocity record failed (non-critical):`, e.message)
+            );
+
             r.action = "published"; r.url = pub.post?.url; r.status = pub.post?.status; results.push(r); continue;
           } else {
             plan.attempts = (plan.attempts || 0) + 1;

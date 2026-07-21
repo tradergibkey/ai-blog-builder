@@ -1,16 +1,23 @@
 // =============================================================================
 //  AI BLOG BUILDER  —  api/app/publish.js   (PHASE 2 — piece 3)
 // -----------------------------------------------------------------------------
-//  WordPress publisher. Takes a tenant ID and either:
+//  WordPress + GitHub-static publisher. Takes a tenant ID and either:
 //    a) a pre-generated article (from generate.js), or
 //    b) a topic (generates + publishes in one call)
 //
+//  SIMILARITY GUARD (Phase 7): after an article is ready but BEFORE committing,
+//  checks it against the tenant's recent corpus using shingled Jaccard
+//  similarity. If the draft is too close to a prior post, the publish is
+//  rejected so the cron can retry with a fresh generation.
+//
 //  Flow:
 //    1. Read tenant profile (for draft/publish setting)
-//    2. Decrypt WP credentials
-//    3. Optionally fetch hero image from Pexels and upload to WP media library
-//    4. Create the post via WP REST API
-//    5. Log to tenant history
+//    2. Decrypt credentials
+//    3. Optionally fetch hero image from Pexels
+//    4. SIMILARITY CHECK — reject near-duplicates
+//    5. Create the post via WP REST API or GitHub commit
+//    6. Record the post's shingle fingerprint for future checks
+//    7. Log to tenant history
 //
 //  POST /api/app/publish  { id, topic, category }          → generate + publish
 //  POST /api/app/publish  { id, article: { title, body, excerpt, ... } } → publish only
@@ -21,9 +28,14 @@
 
 import { getProfile } from "./_profile.js";
 import { getSecret } from "./_secrets.js";
-import { addHistory, getHistory } from "./_store.js";
+import { addHistory, getHistory, getStr, setStr } from "./_store.js";
+import { checkDuplicate, recordPost } from "../../lib/similarity-guard.js";
 
 export const config = { maxDuration: 180 };
+
+// KV wrappers for similarity-guard (strip "abb:" prefix — _store adds its own)
+const kvGet = (k) => getStr(k.startsWith("abb:") ? k.slice(4) : k);
+const kvSet = (k, v) => setStr(k.startsWith("abb:") ? k.slice(4) : k, v);
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
@@ -82,6 +94,20 @@ export default async function handler(req, res) {
 
     if (!article || !article.title || !article.body) {
       return res.status(400).json({ error: "Article missing title or body." });
+    }
+
+    // ── SIMILARITY GUARD: reject near-duplicate content before publishing ──
+    const dupCheck = await checkDuplicate({ tenant: id, draftText: article.body, kvGet }).catch(e => {
+      console.error(`[${id}] Similarity check failed (allowing publish):`, e.message);
+      return { isDuplicate: false, maxScore: 0, against: null, draftShingles: [] };
+    });
+    if (dupCheck.isDuplicate) {
+      return res.status(409).json({
+        error: "Near-duplicate content detected",
+        detail: `Draft is ${(dupCheck.maxScore * 100).toFixed(0)}% similar to a prior post (${dupCheck.against}). Retry to generate a fresh version.`,
+        similarTo: dupCheck.against,
+        score: dupCheck.maxScore,
+      });
     }
 
     // ---- 3) Upload hero image (optional — needs PEXELS_API_KEY) ----
@@ -171,6 +197,13 @@ export default async function handler(req, res) {
 
     const post = await postRes.json();
 
+    // ── SIMILARITY GUARD: record this post's fingerprint for future checks ──
+    if (dupCheck.draftShingles && dupCheck.draftShingles.length) {
+      await recordPost({
+        tenant: id, postId: `wp-${post.id}`, draftShingles: dupCheck.draftShingles, kvGet, kvSet,
+      }).catch(e => console.error(`[${id}] Shingle record failed (non-critical):`, e.message));
+    }
+
     // ---- 5) Log to tenant history ----
     await addHistory(id, {
       wpPostId:     post.id,
@@ -180,6 +213,7 @@ export default async function handler(req, res) {
       category:     article.category || null,
       language:     article.language || profile.primaryLanguage || "en",
       topic:        article.topic || "",
+      archetype:    article.archetype || null,
       published_at: new Date().toISOString(),
     });
 
@@ -191,6 +225,7 @@ export default async function handler(req, res) {
         url:    post.link || `${base}/?p=${post.id}`,
         status: publishAs,
         featuredImage: !!featuredMediaId,
+        archetype: article.archetype || null,
       },
     });
 
@@ -202,19 +237,6 @@ export default async function handler(req, res) {
 
 // =============================================================================
 //  GITHUB-STATIC PUBLISHER
-// -----------------------------------------------------------------------------
-//  For tenants whose site is a static repo (HTML/CSS/JS on GitHub → Vercel).
-//  Publishing = committing files:
-//    1. Generate the article (reuse generate.js) if not supplied
-//    2. Pick a Pexels hero image URL (hotlinked — no media library)
-//    3. Read blog/post-template.html from the repo, fill placeholders
-//    4. Commit the filled post to blog/posts/<slug>.html
-//    5. Read blog/index.html, inject a card between the BLOG-LIST markers,
-//       drop the empty-state placeholder, commit it back
-//    6. Log to tenant history
-//
-//  Credentials (from _secrets): github_repo ("owner/name"), github_branch,
-//  github_token (PAT with Contents: read+write on that repo).
 // =============================================================================
 async function publishToGitHub(req, res, id, profile, body) {
   const repo   = await getSecret(id, "github_repo");
@@ -259,6 +281,20 @@ async function publishToGitHub(req, res, id, profile, body) {
 
   if (!article || !article.title || !article.body) {
     return res.status(400).json({ error: "Article missing title or body." });
+  }
+
+  // ── SIMILARITY GUARD: reject near-duplicate content before committing ──
+  const dupCheck = await checkDuplicate({ tenant: id, draftText: article.body, kvGet }).catch(e => {
+    console.error(`[${id}] Similarity check failed (allowing publish):`, e.message);
+    return { isDuplicate: false, maxScore: 0, against: null, draftShingles: [] };
+  });
+  if (dupCheck.isDuplicate) {
+    return res.status(409).json({
+      error: "Near-duplicate content detected",
+      detail: `Draft is ${(dupCheck.maxScore * 100).toFixed(0)}% similar to a prior post (${dupCheck.against}). Retry to generate a fresh version.`,
+      similarTo: dupCheck.against,
+      score: dupCheck.maxScore,
+    });
   }
 
   // ---- 2) Images: hero + 2 inline (all hotlinked Pexels URLs) ----
@@ -378,6 +414,13 @@ async function publishToGitHub(req, res, id, profile, body) {
     console.error("Index card injection failed (post still committed):", e.message);
   }
 
+  // ── SIMILARITY GUARD: record this post's fingerprint for future checks ──
+  if (dupCheck.draftShingles && dupCheck.draftShingles.length) {
+    await recordPost({
+      tenant: id, postId: slug, draftShingles: dupCheck.draftShingles, kvGet, kvSet,
+    }).catch(e => console.error(`[${id}] Shingle record failed (non-critical):`, e.message));
+  }
+
   // ---- 7) Log to tenant history ----
   const postUrl = `${(profile.siteUrl || "").replace(/\/+$/, "")}/blog/posts/${slug}`;
   await addHistory(id, {
@@ -387,6 +430,7 @@ async function publishToGitHub(req, res, id, profile, body) {
     category:     article.category || null,
     language:     article.language || profile.primaryLanguage || "hu",
     topic:        article.topic || "",
+    archetype:    article.archetype || null,
     published_at: dateIso,
   });
 
@@ -399,6 +443,7 @@ async function publishToGitHub(req, res, id, profile, body) {
       slug,
       featuredImage: !!heroImg,
       indexUpdated: cardInjected,
+      archetype: article.archetype || null,
     },
   });
 }
@@ -471,11 +516,6 @@ function injectCard(indexHtml, p) {
 
 // =============================================================================
 //  FAQ SECTION (Phase 5b)
-// -----------------------------------------------------------------------------
-//  Appends a visible FAQ section (HTML) + FAQPage JSON-LD schema to the article
-//  body. Google, Perplexity, and ChatGPT all index FAQPage structured data,
-//  making these Q&As quotable in AI-generated answers. The visible HTML also
-//  improves on-page engagement and keyword coverage.
 // =============================================================================
 function appendFaq(body, faqItems) {
   if (!faqItems || !faqItems.length) return body;
@@ -507,12 +547,6 @@ function appendFaq(body, faqItems) {
 
 // =============================================================================
 //  INTERNAL LINKING (Phase 5a)
-// -----------------------------------------------------------------------------
-//  Given a new article body + the tenant's publish history, ask Claude to pick
-//  2-3 genuinely relevant prior posts and the exact phrases in THIS article to
-//  hyperlink to them. Insert those links. Never blocks publish on failure.
-//  Gated by profile.authority.enabled and history.length >= 3 (checked by caller
-//  for enabled; this function checks the count).
 // =============================================================================
 async function addInternalLinks(body, history, currentTitle) {
   const pool = (history || []).filter(h => h.url && h.title && h.title !== currentTitle);
@@ -599,8 +633,8 @@ Call suggest_links.`;
     const cand = candidates.find(c => c.n === s.linkToN);
     if (!cand || !s.anchorPhrase) continue;
     const href = urlToPath(cand.url);
-    const res = linkPhrase(body, s.anchorPhrase, href);
-    if (res.linked) { body = res.body; linked++; }
+    const linkResult = linkPhrase(body, s.anchorPhrase, href);
+    if (linkResult.linked) { body = linkResult.body; linked++; }
   }
   return body;
 }
@@ -627,9 +661,6 @@ function urlToPath(url) {
 }
 
 // Inject inline images into the article body HTML.
-// Strategy: if Claude placed {{INLINE_IMG_1/2}} markers, replace them.
-// Fallback: if markers are missing, inject after the 1st and 2nd </h2> closings.
-// If no image URL is available for a slot, the marker is simply removed (no broken img).
 function injectInlineImages(body, img1, img2, alt1, alt2) {
   const hasMarker1 = body.includes("{{INLINE_IMG_1}}");
   const hasMarker2 = body.includes("{{INLINE_IMG_2}}");
@@ -638,11 +669,9 @@ function injectInlineImages(body, img1, img2, alt1, alt2) {
   const tag2 = img2 ? `<img src="${esc(img2)}" alt="${esc(alt2 || "")}" loading="lazy">` : "";
 
   if (hasMarker1 || hasMarker2) {
-    // Claude placed markers — use them
     body = body.replace("{{INLINE_IMG_1}}", tag1);
     body = body.replace("{{INLINE_IMG_2}}", tag2);
   } else {
-    // Fallback: inject after 1st and 2nd </h2>
     let h2count = 0;
     body = body.replace(/<\/h2>/gi, (match) => {
       h2count++;
@@ -650,7 +679,6 @@ function injectInlineImages(body, img1, img2, alt1, alt2) {
       if (h2count === 2 && tag2) return match + "\n" + tag2;
       return match;
     });
-    // If only 1 H2 existed and we have tag2, try after 1st </h3>
     if (h2count < 2 && tag2) {
       let h3done = false;
       body = body.replace(/<\/h3>/i, (match) => {
@@ -709,7 +737,6 @@ async function pexelsImageUrl(query) {
 //  Pexels → download → upload to WP Media Library
 // ---------------------------------------------------------------------------
 async function uploadHeroImage(wpBase, wpHeaders, query, altText) {
-  // 1) Search Pexels
   const pexRes = await fetch(
     `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=5&orientation=landscape`,
     { headers: { Authorization: process.env.PEXELS_API_KEY } }
@@ -720,17 +747,14 @@ async function uploadHeroImage(wpBase, wpHeaders, query, altText) {
   const photos = pexData.photos || [];
   if (!photos.length) throw new Error("No Pexels images found for: " + query);
 
-  // Pick a random image from top 5 for variety
   const photo = photos[Math.floor(Math.random() * photos.length)];
   const imgUrl = photo.src?.large2x || photo.src?.large || photo.src?.original;
   if (!imgUrl) throw new Error("No usable image URL");
 
-  // 2) Download the image
   const imgRes = await fetch(imgUrl);
   if (!imgRes.ok) throw new Error(`Image download failed: ${imgRes.status}`);
   const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
 
-  // 3) Upload to WordPress media library
   const filename = `abb-hero-${Date.now()}.jpg`;
   const uploadRes = await fetch(`${wpBase}/wp-json/wp/v2/media`, {
     method: "POST",
@@ -748,7 +772,6 @@ async function uploadHeroImage(wpBase, wpHeaders, query, altText) {
 
   const media = await uploadRes.json();
 
-  // 4) Set alt text
   if (media.id && altText) {
     await fetch(`${wpBase}/wp-json/wp/v2/media/${media.id}`, {
       method: "POST",
@@ -764,7 +787,6 @@ async function uploadHeroImage(wpBase, wpHeaders, query, altText) {
 //  Find existing WP category by name, or create it
 // ---------------------------------------------------------------------------
 async function findOrCreateCategory(wpBase, wpHeaders, categoryName) {
-  // Search existing
   const searchRes = await fetch(
     `${wpBase}/wp-json/wp/v2/categories?search=${encodeURIComponent(categoryName)}&per_page=5`,
     { headers: wpHeaders }
@@ -778,7 +800,6 @@ async function findOrCreateCategory(wpBase, wpHeaders, categoryName) {
     if (match) return match.id;
   }
 
-  // Create new
   const createRes = await fetch(`${wpBase}/wp-json/wp/v2/categories`, {
     method: "POST",
     headers: { ...wpHeaders, "Content-Type": "application/json" },

@@ -56,6 +56,23 @@ export async function delRaw(key) {
 }
 
 // ---------------------------------------------------------------------------
+//  Raw string get / set  — for lib modules that handle their own serialization
+//  (similarity-guard, publish-policy). Avoids double-JSON wrapping.
+//  Keys still get the "abb:" prefix for isolation.
+// ---------------------------------------------------------------------------
+export async function getStr(key) {
+  return await cmd("GET", PREFIX + key);
+}
+
+export async function setStr(key, value, opts) {
+  if (opts && opts.ex) {
+    await cmd("SET", PREFIX + key, value, "EX", opts.ex);
+  } else {
+    await cmd("SET", PREFIX + key, value);
+  }
+}
+
+// ---------------------------------------------------------------------------
 //  Tenant registry  — the list the cron will loop over (key: abb:tenants)
 // ---------------------------------------------------------------------------
 export async function listTenants() {

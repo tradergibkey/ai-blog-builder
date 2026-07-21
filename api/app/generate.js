@@ -4,17 +4,24 @@
 //  Tenant-aware content generator. Reads the tenant profile (voice, language,
 //  categories, audience, niche) and generates an article via Claude.
 //
+//  STRUCTURAL VARIETY (Phase 7): each post is written to a different archetype
+//  (deep-dive, listicle, comparison, how-to, Q&A, case-study, opinion) so
+//  consecutive articles don't share a skeleton — the templating signal Google
+//  flags at the site level.
+//
 //  Returns structured JSON — does NOT publish. publish.js handles that.
 //
 //  POST /api/app/generate  { id: "elsyfx.net", topic: "...", category: "..." }
 //
-//  Returns: { ok, article: { title, body, excerpt, metaDescription, imageQuery, language } }
+//  Returns: { ok, article: { title, body, excerpt, metaDescription, imageQuery, language, archetype } }
 //
 //  AUTH: x-app-secret (operator only)
 //  ENV:  ABB_APP_SECRET, ANTHROPIC_API_KEY
 // =============================================================================
 
 import { getProfile } from "./_profile.js";
+import { getRaw, setRaw } from "./_store.js";
+import { pickArchetype, buildOutlineDirective } from "../../lib/article-structure.js";
 
 export const config = { maxDuration: 120 };
 
@@ -47,6 +54,11 @@ export default async function handler(req, res) {
     const siteName  = profile.siteName || "the blog";
     const cats      = (profile.categories || []).join(", ") || "general";
 
+    // ---- 1b) Pick a structural archetype ----
+    const recentKeys = (await getRaw(`t:${id}:archetypes`)) || [];
+    const { key: archetypeKey, archetype } = pickArchetype({ recentKeys });
+    const outlineDirective = buildOutlineDirective(archetype, topic);
+
     // ---- 2) Build the Claude prompt ----
     const system = `You are an expert blog content writer for "${siteName}".
 
@@ -59,7 +71,6 @@ ${voice}
 
 CONTENT RULES:
 - Write a complete, publish-ready blog article on the given topic.
-- The article should be 800-1200 words, well-structured with H2 and H3 subheadings.
 - Use HTML formatting for the body (h2, h3, p, ul, li, strong, em — NO h1, that's the title).
 - Include practical, actionable advice. No fluff or filler.
 - Write from the perspective of ${siteName}, as if the business is the author.
@@ -130,6 +141,9 @@ Call the write_article tool with your complete article.`;
 TOPIC: ${topic}
 ${category ? `CATEGORY: ${category}` : ""}
 
+STRUCTURAL BLUEPRINT — follow this structure for this article:
+${outlineDirective}
+
 Write the complete article in ${langName}. Make it practical, engaging, and SEO-optimized.`;
 
     // ---- 3) Call Claude ----
@@ -162,6 +176,11 @@ Write the complete article in ${langName}. Make it practical, engaging, and SEO-
     article.language = lang;
     article.category = category;
     article.topic = topic;
+    article.archetype = archetypeKey; // track which skeleton was used
+
+    // ---- 4) Store archetype key for rotation ----
+    const updatedKeys = [archetypeKey, ...recentKeys.filter(k => k !== archetypeKey)].slice(0, 20);
+    await setRaw(`t:${id}:archetypes`, updatedKeys);
 
     // Backward compat: old WP publish path reads article.imageQuery
     // New schema uses heroImageQuery / inlineImageQuery1 / inlineImageQuery2
