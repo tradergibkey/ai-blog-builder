@@ -66,10 +66,21 @@ CONTENT RULES:
 - Do NOT include any header/footer, navigation, CSS, or page wrapper — just the article body HTML.
 - Do NOT start with "In this article" or "In today's post" — start with a compelling opening.
 
+AI CITATION OPTIMIZATION:
+- Start the article with a clear, factual definition or summary paragraph (1-3 sentences) that directly answers the topic as a question. This is what AI search engines (ChatGPT, Perplexity, Google AI) quote in their answers.
+- Throughout the article, use concrete, quotable statements rather than vague generalities. Specific numbers, comparisons, and direct answers perform best.
+- End with a concise "Összefoglalás" (Summary) or "Legfontosabb tudnivalók" (Key takeaways) section — 3-5 bullet points summarizing the article's main advice in clear, self-contained sentences.
+
 SEO RULES:
 - The title should be SEO-friendly (the kind of thing someone would type into Google).
 - Include a meta description (150-160 chars, compelling, includes the main keyword).
 - The excerpt should be 1-2 sentences summarizing the article.
+
+FAQ:
+- Generate 3-5 frequently asked questions (and their answers) related to the article topic.
+- Questions should be what real people would type into Google or ask a voice assistant — natural, specific, practical.
+- Answers should be 2-3 sentences each: direct, factual, self-contained (each answer should make sense on its own without reading the article).
+- Write both questions and answers in ${langName}.
 
 IMAGE:
 - Suggest THREE Pexels search queries (2-4 words each) for relevant, professional photos:
@@ -97,8 +108,20 @@ Call the write_article tool with your complete article.`;
           heroImageQuery:      { type: "string", description: "Pexels search query for the hero banner image, 2-4 words, specific to the article topic" },
           inlineImageQuery1:   { type: "string", description: "Pexels search query for inline image after section 1, 2-4 words, specific to that section" },
           inlineImageQuery2:   { type: "string", description: "Pexels search query for inline image after section 2, 2-4 words, specific to that section" },
+          faq: {
+            type: "array",
+            description: "3-5 FAQ items related to the article topic",
+            items: {
+              type: "object",
+              properties: {
+                question: { type: "string", description: "A natural question someone would ask" },
+                answer:   { type: "string", description: "Direct 2-3 sentence answer" },
+              },
+              required: ["question", "answer"],
+            },
+          },
         },
-        required: ["title", "body", "excerpt", "metaDescription", "heroImageQuery", "inlineImageQuery1", "inlineImageQuery2"],
+        required: ["title", "body", "excerpt", "metaDescription", "heroImageQuery", "inlineImageQuery1", "inlineImageQuery2", "faq"],
       },
     };
 
