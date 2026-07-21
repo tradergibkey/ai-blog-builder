@@ -42,7 +42,10 @@
     <p class="muted">Phase&nbsp;0 foundation. Paste your <code>ABB_APP_SECRET</code>, then run the two checks. This page does nothing without the correct secret, and it never touches the live Campoverde blog.</p>
 
     <label for="secret">ABB_APP_SECRET</label>
-    <input id="secret" type="password" placeholder="paste your operator secret" autocomplete="off">
+    <form onsubmit="event.preventDefault()" autocomplete="on" style="margin:0">
+      <input type="text" name="username" value="abb-operator" autocomplete="username" style="display:none" tabindex="-1">
+      <input id="secret" type="password" name="password" placeholder="paste your operator secret" autocomplete="current-password">
+    </form>
 
     <div class="btns">
       <button id="seedBtn">1 · Seed Campoverde</button>
@@ -101,7 +104,14 @@
     const $ = (id) => document.getElementById(id);
     const ENDPOINT = "/api/app/tenants";           // matches the api/app/ folder
 
-    const secret = () => $("secret").value.trim();
+    const secret = () => {
+      const v = $("secret").value.trim();
+      if (v) { try { sessionStorage.setItem("abb_secret", v); } catch(e) {} }
+      return v;
+    };
+
+    // Auto-fill from sessionStorage (shared with dashboard)
+    try { const s = sessionStorage.getItem("abb_secret"); if (s) $("secret").value = s; } catch(e) {}
 
     function show(kind, msg, data) {
       const s = $("status");
