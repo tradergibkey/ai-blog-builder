@@ -103,6 +103,8 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .cal .day.empty{border:none;background:transparent}
 .cal .day .dn{color:var(--muted);font-size:11px;font-weight:600}
 .cal .day.has{background:var(--grad-soft);border-color:rgba(154,19,60,.35)}
+.cal .day.published{background:var(--ok-bg);border-color:rgba(21,128,61,.4)}
+.cal .day.has.published{background:linear-gradient(135deg,var(--ok-bg) 50%,rgba(227,117,53,.12) 50%);border-color:rgba(21,128,61,.4)}
 .cal .day.today{box-shadow:0 0 0 2px var(--violet)}
 .cal .day .topic{font-size:9px;line-height:1.25;color:var(--violet);margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-weight:600}
 .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
@@ -134,8 +136,13 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
   <h1>AI Blog Builder <span class="grad-text">Dashboard</span></h1>
   <p>Enter your operator secret to view all tenants.</p>
   <div class="gate-row">
-    <input id="gateKey" type="password" placeholder="ABB_APP_SECRET" onkeydown="if(event.key==='Enter')verifyGate()">
-    <button class="btn btn-primary" id="gateBtn" onclick="verifyGate()">Enter</button>
+    <form id="gateForm" onsubmit="event.preventDefault();verifyGate()" autocomplete="on">
+      <input type="text" name="username" value="abb-operator" autocomplete="username" style="display:none" tabindex="-1">
+      <div style="display:flex;gap:10px">
+        <input id="gateKey" type="password" name="password" placeholder="ABB_APP_SECRET" autocomplete="current-password" style="flex:1">
+        <button type="submit" class="btn btn-primary" id="gateBtn">Enter</button>
+      </div>
+    </form>
   </div>
   <div id="gateMsg" class="msg"></div>
 </div>
@@ -179,6 +186,14 @@ const API = "/api/app";
 let SECRET = "";
 let TENANTS = [];
 
+// Auto-login from sessionStorage (shared across dashboard + setup)
+(function autoLogin() {
+  try {
+    const saved = sessionStorage.getItem("abb_secret");
+    if (saved) { $("gateKey").value = saved; verifyGate(); }
+  } catch(e) {}
+})();
+
 async function api(method, path) {
   const r = await fetch(API + path, { method, headers: { "x-app-secret": SECRET } });
   const data = await r.json().catch(() => ({}));
@@ -193,6 +208,7 @@ async function verifyGate() {
   const r = await api("GET", "/tenants");
   $("gateBtn").disabled = false; $("gateBtn").textContent = "Enter";
   if (r.ok && r.data.ok) {
+    try { sessionStorage.setItem("abb_secret", key); } catch(e) {}
     $("gate").style.display = "none";
     $("app").style.display = "flex";
     TENANTS = r.data.tenants || [];
@@ -300,23 +316,32 @@ function renderDetail(id, profile, q) {
   html += `</div>`;
 
   $("detailBody").innerHTML = html;
-  renderCalendar(queue);
+  renderCalendar(queue, history);
 }
 
 /* ─── Calendar ─── */
 let calRef = null;
-function renderCalendar(queue) {
+let calHistory = [];
+function renderCalendar(queue, history) {
   const byDate = {};
   queue.forEach(e => { if (e.date) (byDate[e.date] = byDate[e.date] || []).push(e); });
+  // Published dates from history
+  const pubDates = new Set();
+  (history || calHistory || []).forEach(h => {
+    const d = (h.published_at||"").slice(0,10);
+    if (d) pubDates.add(d);
+  });
+  calHistory = history || calHistory;
   const dates = Object.keys(byDate).sort();
   const first = dates[0] || new Date().toISOString().slice(0,10);
   if (!calRef) { const [y,m] = first.split("-").map(Number); calRef = { y, m:m-1 }; }
-  drawCalendar(byDate);
+  drawCalendar(byDate, pubDates);
 }
 
-function drawCalendar(byDate) {
+function drawCalendar(byDate, pubDates) {
   const mount = $("calMount");
   if (!mount) return;
+  pubDates = pubDates || new Set();
   const y = calRef.y, m = calRef.m;
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const first = new Date(Date.UTC(y, m, 1));
@@ -334,8 +359,8 @@ function drawCalendar(byDate) {
   for (let d=1; d<=daysInMonth; d++) {
     const ds = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
     const items = byDate[ds] || [];
-    const cls = "day" + (items.length?" has":"") + (ds===todayStr?" today":"");
-    const topic = items.length ? `<div class="topic">${escapeHtml(items[0].topic||"")}</div>` : "";
+    const cls = "day" + (items.length?" has":"") + (pubDates.has(ds)?" published":"") + (ds===todayStr?" today":"");
+    const topic = items.length ? `<div class="topic">${escapeHtml(items[0].topic||"")}</div>` : (pubDates.has(ds) ? `<div class="topic" style="color:var(--ok)">✓ Published</div>` : "");
     html += `<div class="${cls}"><div class="dn">${d}</div>${topic}</div>`;
   }
   html += `</div>`;
@@ -347,7 +372,10 @@ function calMove(delta) {
   calRef.m += delta;
   if (calRef.m < 0) { calRef.m = 11; calRef.y--; }
   if (calRef.m > 11) { calRef.m = 0; calRef.y++; }
-  drawCalendar($("calMount")._byDate || {});
+  const mount = $("calMount");
+  const pubDates = new Set();
+  (calHistory||[]).forEach(h => { const d=(h.published_at||"").slice(0,10); if(d) pubDates.add(d); });
+  drawCalendar(mount._byDate || {}, pubDates);
 }
 
 function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
