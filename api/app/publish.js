@@ -129,6 +129,11 @@ export default async function handler(req, res) {
       }
     }
 
+    // FAQ section (Phase 5b) — visible HTML + FAQPage JSON-LD
+    if (article.faq && article.faq.length) {
+      wpBody = appendFaq(wpBody, article.faq);
+    }
+
     // ---- 4) Create the post ----
     const publishAs = profile.integration?.defaults?.publishAs || "draft";
 
@@ -308,6 +313,11 @@ async function publishToGitHub(req, res, id, profile, body) {
     }
   }
 
+  // FAQ section (Phase 5b) — visible HTML + FAQPage JSON-LD for AI citations
+  if (article.faq && article.faq.length) {
+    articleBody = appendFaq(articleBody, article.faq);
+  }
+
   // ---- 3) Build slug + dates ----
   const slug = slugify(article.title);
   const now  = new Date();
@@ -457,6 +467,42 @@ function injectCard(indexHtml, p) {
   }
 
   return before + middle + after;
+}
+
+// =============================================================================
+//  FAQ SECTION (Phase 5b)
+// -----------------------------------------------------------------------------
+//  Appends a visible FAQ section (HTML) + FAQPage JSON-LD schema to the article
+//  body. Google, Perplexity, and ChatGPT all index FAQPage structured data,
+//  making these Q&As quotable in AI-generated answers. The visible HTML also
+//  improves on-page engagement and keyword coverage.
+// =============================================================================
+function appendFaq(body, faqItems) {
+  if (!faqItems || !faqItems.length) return body;
+
+  // Visible HTML
+  let html = `\n<section class="faq-section">\n<h2>Gyakran ismételt kérdések</h2>\n`;
+  for (const item of faqItems) {
+    html += `<div class="faq-item">\n<h3>${esc(item.question)}</h3>\n<p>${esc(item.answer)}</p>\n</div>\n`;
+  }
+  html += `</section>\n`;
+
+  // FAQPage JSON-LD (Google/AI structured data)
+  const faqLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": faqItems.map(item => ({
+      "@type": "Question",
+      "name": item.question,
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": item.answer,
+      },
+    })),
+  };
+  html += `<script type="application/ld+json">${JSON.stringify(faqLd)}</script>\n`;
+
+  return body + html;
 }
 
 // =============================================================================
