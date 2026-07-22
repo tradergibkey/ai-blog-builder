@@ -152,6 +152,9 @@ code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
 .step-errors.show{display:block}
 .step-errors ul{margin:4px 0 0;padding-left:18px}
 
+/* gtag field monospace */
+#gtagId{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:14px;letter-spacing:.01em}
+
 .step{display:none}.step.active{display:block}
 @media(max-width:500px){.card{padding:20px 16px}.platforms{grid-template-columns:repeat(2,1fr)}.btn-row{flex-wrap:wrap}.summary .row{flex-direction:column;gap:2px}.summary .row .k{min-width:0}.gate-row{flex-direction:column}.ai-row{flex-direction:column}}
 </style>
@@ -367,7 +370,7 @@ code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
       <input type="text" id="catInput" placeholder="New category" onkeydown="if(event.key==='Enter'){event.preventDefault();addCat()}">
       <button class="btn btn-ghost btn-sm" onclick="addCat()">+ Add</button>
     </div>
-    <div id="catErr" class="field-err" style="display:none;margin-top:6px">Add at least one category.</div>
+    <div id="catErr" class="field-err" style="display:none;margin-top:6px">Add at least one content category.</div>
   </div>
 
   <div style="margin-bottom:18px">
@@ -437,6 +440,18 @@ code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
     <label class="toggle"><input type="checkbox" id="authorityToggle"><span class="slider"></span></label>
     <div><span class="toggle-label">Smart internal linking</span>
     <span class="hint" style="display:block;font-size:12px;color:var(--faint)">Automatically links new articles to your earlier posts for better SEO. Needs 3+ published articles to start.</span></div>
+  </div>
+
+  <!-- ═══ GTAG / TRACKING FIELD (added for global ad tag injection) ═══ -->
+  <div style="margin-top:16px">
+    <label class="field" id="f_gtagId">
+      <span class="lbl">Google Ads / Analytics tag ID <span style="font-size:11px;color:var(--faint);font-weight:400">(optional)</span></span>
+      <span class="hint">Your Google tag ID (e.g. <code>AW-18339451265</code> or <code>G-XXXXXXXXXX</code>). We'll inject tracking, consent mode, and a cookie banner into every article.</span>
+      <input type="text" id="gtagId" placeholder="AW-… or G-… or GT-…" autocomplete="off" spellcheck="false" oninput="validateGtag(false)" onblur="validateGtag(true)">
+      <div class="field-err">Tag ID must start with AW-, G-, or GT- followed by at least 6 characters.</div>
+    </label>
+    <div id="gtagWarn" class="msg warn" style="margin-top:-8px;margin-bottom:10px"></div>
+    <div id="gtagOk" class="msg ok" style="margin-top:-8px;margin-bottom:10px"></div>
   </div>
 
   <div class="btn-row">
@@ -574,7 +589,7 @@ function toggleGhGuide() {
   const g = $("ghGuide");
   const open = g.style.display !== "none";
   g.style.display = open ? "none" : "block";
-  $("ghGuideBtn").textContent = open ? "How to create a GitHub token ▸" : "How to create a GitHub token ▾";
+  $("ghGuideBtn").textContent = open ? "How to create a GitHub token \u25B8" : "How to create a GitHub token \u25BE";
 }
 
 let ghValTimer = null;
@@ -587,7 +602,7 @@ async function ghValidateLive() {
   const token = ($("ghToken")||{}).value?.trim();
   const v = $("ghValidation");
   if (!repo || !token || !/^[^\/\s]+\/[^\/\s]+$/.test(repo)) { v.className = "msg"; v.textContent = ""; return; }
-  v.className = "msg info show"; v.textContent = "Checking connection…";
+  v.className = "msg info show"; v.textContent = "Checking connection\u2026";
   try {
     const r = await fetch("https://api.github.com/repos/" + repo, {
       headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" }
@@ -595,25 +610,59 @@ async function ghValidateLive() {
     if (r.ok) {
       const data = await r.json();
       const canPush = data.permissions?.push === true;
-      if (canPush) { v.className = "msg ok show"; v.textContent = "✓ Connected — can write to " + repo; }
-      else { v.className = "msg warn show"; v.textContent = "⚠ Token can read " + repo + " but may not have write access. Check Contents permission."; }
+      if (canPush) { v.className = "msg ok show"; v.textContent = "\u2713 Connected \u2014 can write to " + repo; }
+      else { v.className = "msg warn show"; v.textContent = "\u26A0 Token can read " + repo + " but may not have write access. Check Contents permission."; }
     } else if (r.status === 404) {
-      v.className = "msg err show"; v.textContent = "✗ Repo not found, or token doesn't have access to " + repo;
+      v.className = "msg err show"; v.textContent = "\u2717 Repo not found, or token doesn't have access to " + repo;
     } else if (r.status === 401) {
-      v.className = "msg err show"; v.textContent = "✗ Invalid token — check you copied it correctly.";
+      v.className = "msg err show"; v.textContent = "\u2717 Invalid token \u2014 check you copied it correctly.";
     } else {
-      v.className = "msg err show"; v.textContent = "✗ GitHub returned " + r.status;
+      v.className = "msg err show"; v.textContent = "\u2717 GitHub returned " + r.status;
     }
   } catch (e) {
-    v.className = "msg warn show"; v.textContent = "Could not reach GitHub — check your connection.";
+    v.className = "msg warn show"; v.textContent = "Could not reach GitHub \u2014 check your connection.";
   }
+}
+
+/* ═══ GTAG VALIDATION ═══ */
+function validateGtag(isBlur) {
+  var v = ($("gtagId") || {}).value || "";
+  v = v.trim();
+  var field = $("f_gtagId");
+  var warn = $("gtagWarn");
+  var ok = $("gtagOk");
+
+  if (!v) {
+    // Empty — not an error, but warn on blur / step transition
+    field.classList.remove("err");
+    ok.className = "msg ok"; ok.textContent = "";
+    if (isBlur) {
+      warn.className = "msg warn show";
+      warn.textContent = "Without a tracking tag, you won\u2019t be able to measure traffic or conversions on posts ABB creates for you.";
+    }
+    return "warn";
+  }
+
+  // Valid format: AW- / G- / GT- followed by 6+ chars
+  if (/^(AW-|G-|GT-).{6,}$/.test(v)) {
+    field.classList.remove("err");
+    warn.className = "msg warn"; warn.textContent = "";
+    ok.className = "msg ok show"; ok.textContent = "\u2713 Valid tag ID";
+    return "ok";
+  }
+
+  // Invalid format
+  field.classList.add("err");
+  warn.className = "msg warn"; warn.textContent = "";
+  ok.className = "msg ok"; ok.textContent = "";
+  return "err";
 }
 
 /* ═══ AUTH GATE ═══ */
 async function verifyGate() {
   const key = $("gateKey").value.trim();
   if (!key) return showMsg("gateMsg","err","Enter your operator key.");
-  $("gateBtn").disabled = true; $("gateBtn").textContent = "Checking…";
+  $("gateBtn").disabled = true; $("gateBtn").textContent = "Checking\u2026";
   try {
     const r = await apiFetch("GET",`${API}/tenants`,null,key);
     if (!r.ok) throw new Error(r.data.error||"Invalid key.");
@@ -699,6 +748,11 @@ function validateStep(step) {
   if(step===4){
     const s=+$("windowStart").value, e=+$("windowEnd").value;
     if(e<=s) errs.push("Publish window end must be after start.");
+    // Gtag validation: invalid format blocks, empty just warns
+    var gtagResult = validateGtag(true);
+    if (gtagResult === "err") {
+      errs.push("Tag ID must start with AW-, G-, or GT- followed by at least 6 characters.");
+    }
   }
   if(step===5){
     req("referral","Tell us how you heard about us.");
@@ -717,8 +771,8 @@ async function runAnalyze() {
   const url = $("siteUrl").value.trim();
   if(!url) return showMsg("analyzeMsg","err","Enter a website URL first.");
   const btn = $("analyzeBtn");
-  btn.disabled = true; btn.innerHTML = "✦ Analyzing…";
-  showMsg("analyzeMsg","info","Reading your website — this takes about 10 seconds…");
+  btn.disabled = true; btn.innerHTML = "\u2726 Analyzing\u2026";
+  showMsg("analyzeMsg","info","Reading your website \u2014 this takes about 10 seconds\u2026");
   ["siteName","siteDesc","siteAudience","voice"].forEach(id => $(id).classList.add("shimmer"));
 
   try {
@@ -736,7 +790,7 @@ async function runAnalyze() {
 
     showMsg("analyzeMsg","ok","Done! Review the fields and adjust anything that needs tweaking.");
   } catch(e){ showMsg("analyzeMsg","err",e.message); }
-  finally { ["siteName","siteDesc","siteAudience","voice"].forEach(id=>$(id).classList.remove("shimmer")); btn.disabled=false; btn.innerHTML="✦ Let AI fill this form"; }
+  finally { ["siteName","siteDesc","siteAudience","voice"].forEach(id=>$(id).classList.remove("shimmer")); btn.disabled=false; btn.innerHTML="\u2726 Let AI fill this form"; }
 }
 
 /* Fetch + cache the analysis WITHOUT touching any fields */
@@ -745,7 +799,7 @@ async function ensureAnalysis(btn) {
   const url = $("siteUrl").value.trim();
   if (!url) { showMsg("analyzeMsg","err","Enter your website URL first, then click the AI button."); return false; }
   const old = btn ? btn.textContent : "";
-  if (btn) { btn.disabled = true; btn.textContent = "✦ …"; }
+  if (btn) { btn.disabled = true; btn.textContent = "\u2726 \u2026"; }
   try {
     const r = await apiFetch("POST",`${API}/analyze`,{url});
     if (!r.ok) throw new Error(r.data.error||"Analysis failed.");
@@ -776,7 +830,7 @@ async function aiFillField(fieldId, ev) {
 /* ═══ COMPETITORS ═══ */
 function renderComps() {
   $("compList").innerHTML = competitors.map((c,i) => {
-    const label = typeof c==="object" ? `<span>${esc(c.url)}</span>${c.reason?'<span class="comp-reason"> — '+esc(c.reason)+'</span>':''}` : `<span>${esc(c)}</span>`;
+    const label = typeof c==="object" ? `<span>${esc(c.url)}</span>${c.reason?'<span class="comp-reason"> \u2014 '+esc(c.reason)+'</span>':''}` : `<span>${esc(c)}</span>`;
     return `<div class="comp-item">${label}<button onclick="removeComp(${i})">&times;</button></div>`;
   }).join("");
 }
@@ -796,8 +850,8 @@ async function findCompetitors() {
   const siteUrl = $("siteUrl").value.trim();
   if(!niche&&!audience) return showMsg("compMsg","err","Fill in your audience first so we know who to search for.");
   const btn=$("compSearchBtn");
-  btn.disabled=true; btn.textContent="✦ Searching…";
-  showMsg("compMsg","info","Searching the web for your competitors — this may take 15-30 seconds…");
+  btn.disabled=true; btn.textContent="\u2726 Searching\u2026";
+  showMsg("compMsg","info","Searching the web for your competitors \u2014 this may take 15-30 seconds\u2026");
   try {
     const r = await apiFetch("POST",`${API}/competitors`,{niche,audience,siteUrl,primaryLanguage:$("primaryLang").value});
     if(!r.ok) throw new Error(r.data.error||"Search failed.");
@@ -805,9 +859,9 @@ async function findCompetitors() {
       competitors = r.data.competitors;
       renderComps();
       showMsg("compMsg","ok","Found "+competitors.length+" competitors. Remove any that don't fit, or add your own.");
-    } else { showMsg("compMsg","warn","No competitors found — try adding them manually."); }
+    } else { showMsg("compMsg","warn","No competitors found \u2014 try adding them manually."); }
   } catch(e){ showMsg("compMsg","err",e.message); }
-  finally{ btn.disabled=false; btn.textContent="✦ Find my competitors"; }
+  finally{ btn.disabled=false; btn.textContent="\u2726 Find my competitors"; }
 }
 
 /* ═══ CATEGORIES ═══ */
@@ -865,20 +919,23 @@ function renderReview(){
   const LN={en:"English",es:"Spanish",de:"German",fr:"French",it:"Italian",pt:"Portuguese",nl:"Dutch",hu:"Hungarian",pl:"Polish",sv:"Swedish",da:"Danish",no:"Norwegian",fi:"Finnish",ja:"Japanese",ko:"Korean",zh:"Chinese",ar:"Arabic",hi:"Hindi"};
   const PN={}; PLATFORMS.forEach(p=>PN[p.id]=p.name);
   const autoLabel=$("autoPublish").checked?"Fully automated (publish immediately)":"Draft first (you review before publishing)";
+  const gtagVal = ($("gtagId").value || "").trim();
+  const trackingLabel = gtagVal ? "gtag: " + esc(gtagVal) : '<span style="color:var(--warn)">Not configured \u2014 no tracking on articles</span>';
   const rows=[
-    ["Site",esc($("siteName").value)||"—"],["URL",esc($("siteUrl").value)||"—"],
-    ["Description",esc($("siteDesc").value)||"—"],["Audience",esc($("siteAudience").value)||"—"],
+    ["Site",esc($("siteName").value)||"\u2014"],["URL",esc($("siteUrl").value)||"\u2014"],
+    ["Description",esc($("siteDesc").value)||"\u2014"],["Audience",esc($("siteAudience").value)||"\u2014"],
     ["Platform",PN[selectedPlatform]||"Not selected"],
     ["Language",LN[$("primaryLang").value]+(bil?" + "+LN[$("secondaryLang").value]:"")],
     ["Competitors",competitors.length?competitors.map(c=>esc(typeof c==="object"?c.url:c)).join(", "):"None"],
     ["Brand color",'<span style="display:inline-block;width:18px;height:18px;border-radius:4px;vertical-align:middle;background:'+$("brandColor").value+'"></span> '+$("brandColor").value],
     ["Categories",categories.length?esc(categories.join(", ")):"None"],
-    ["Voice",esc($("voice").value)||"—"],
+    ["Voice",esc($("voice").value)||"\u2014"],
     ["Queue size",$("queueTarget").value+" articles"],
     ["Timezone",esc($("timezone").value)],
-    ["Publish window",$("windowStart").value+":00 – "+$("windowEnd").value+":00"],
+    ["Publish window",$("windowStart").value+":00 \u2013 "+$("windowEnd").value+":00"],
     ["Publishing",autoLabel],
     ["Internal linking",$("authorityToggle").checked?"Enabled":"Off"],
+    ["Tracking",trackingLabel],
   ];
   $("reviewSummary").innerHTML=rows.map(([k,v])=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
 }
@@ -889,7 +946,7 @@ async function saveProfile(){
   if(errs.length){ const b=$("s5err"); b.className="step-errors show"; b.innerHTML="<strong>Please fix:</strong><ul>"+errs.map(e=>"<li>"+e+"</li>").join("")+"</ul>"; return; }
   $("s5err").className="step-errors";
 
-  const btn=$("saveBtn"); btn.disabled=true; btn.textContent="Saving…";
+  const btn=$("saveBtn"); btn.disabled=true; btn.textContent="Saving\u2026";
   const bil=$("bilingualToggle").checked;
   const wpUrl=$("wpUrl").value.trim(), wpUser=$("wpUser").value.trim(), wpPass=$("wpAppPass").value.trim();
   const hasWpCreds = selectedPlatform==="wordpress"&&!!(wpUrl&&wpUser&&wpPass);
@@ -899,6 +956,9 @@ async function saveProfile(){
   // Tenant ID = domain
   const tenantId = extractDomain($("siteUrl").value.trim());
   if(!tenantId){ showMsg("saveMsg","err","Could not extract domain from your URL."); btn.disabled=false; btn.textContent="Save & launch"; return; }
+
+  // Gtag — trim and store only if non-empty
+  const gtagVal = ($("gtagId").value || "").trim();
 
   const profile={
     siteName:$("siteName").value.trim(),
@@ -923,6 +983,7 @@ async function saveProfile(){
     publishWindow:{startHour:parseInt($("windowStart").value),endHour:parseInt($("windowEnd").value)},
     cadence:cadence,
     authority:{enabled:$("authorityToggle").checked,features:[]},
+    tracking:{gtagId:gtagVal||null},
     referralSource:$("referral").value==="other"?("other: "+$("referralOther").value.trim()):$("referral").value,
   };
 
@@ -951,17 +1012,17 @@ async function saveProfile(){
 
     // Connection confirmation per integration type
     if (hasWpCreds) {
-      showMsg("doneWpLine","info","Checking your WordPress connection…");
+      showMsg("doneWpLine","info","Checking your WordPress connection\u2026");
       apiFetch("GET",`${API}/wp-test?id=`+encodeURIComponent(tenantId)).then(r=>{
-        if (r.ok && r.data.connected) showMsg("doneWpLine","ok","✓ WordPress connected — logged in as "+(r.data.user.displayName||r.data.user.username)+".");
-        else showMsg("doneWpLine","warn","⚠ WordPress connection couldn't be verified: "+(r.data.error||"unknown error")+" — we'll retry before publishing.");
+        if (r.ok && r.data.connected) showMsg("doneWpLine","ok","\u2713 WordPress connected \u2014 logged in as "+(r.data.user.displayName||r.data.user.username)+".");
+        else showMsg("doneWpLine","warn","\u26A0 WordPress connection couldn't be verified: "+(r.data.error||"unknown error")+" \u2014 we'll retry before publishing.");
       }).catch(()=>{});
     } else if (selectedPlatform === "wordpress") {
-      showMsg("doneWpLine","warn","⚠ WordPress isn't connected yet — articles can't publish until you connect it.");
+      showMsg("doneWpLine","warn","\u26A0 WordPress isn't connected yet \u2014 articles can't publish until you connect it.");
     } else if (isGh && hasGhCreds) {
-      showMsg("doneWpLine","ok","✓ GitHub connected — committing to "+esc(ghRepo)+" ("+esc(ghBranch)+").");
+      showMsg("doneWpLine","ok","\u2713 GitHub connected \u2014 committing to "+esc(ghRepo)+" ("+esc(ghBranch)+").");
     } else if (isGh) {
-      showMsg("doneWpLine","warn","⚠ GitHub isn't connected yet — articles can't publish until you add your repo and token.");
+      showMsg("doneWpLine","warn","\u26A0 GitHub isn't connected yet \u2014 articles can't publish until you add your repo and token.");
     }
   }catch(e){
     showMsg("saveMsg","err",e.message);
