@@ -10,6 +10,11 @@
 //  similarity. If the draft is too close to a prior post, the publish is
 //  rejected so the cron can retry with a fresh generation.
 //
+//  TRACKING INJECTION: for github-static tenants with a tracking.gtagId in
+//  their profile, the publisher injects gtag + Consent Mode v2 + a cookie
+//  consent banner into the generated HTML before committing. Language-aware
+//  banner text pulled from the tenant's primaryLanguage.
+//
 //  Flow:
 //    1. Read tenant profile (for draft/publish setting)
 //    2. Decrypt credentials
@@ -140,7 +145,7 @@ export default async function handler(req, res) {
       if (wpInline2 && wpInline2 === wpInline1) { wpInline2 = ""; wpImgWarnings.push("inline2 de-duped"); }
       const wpImgCount = 1 + (wpInline1 ? 1 : 0) + (wpInline2 ? 1 : 0);
       if (wpImgCount < 3) {
-        console.warn(`[${body.id}] WP image shortage: ${wpImgCount}/3 images.`, wpImgWarnings.join("; "));
+        console.warn(`[${id}] WP image shortage: ${wpImgCount}/3 images.`, wpImgWarnings.join("; "));
       }
       wpBody = injectInlineImages(wpBody, wpInline1, wpInline2, wInlQ1, wInlQ2);
     }
@@ -371,7 +376,7 @@ async function publishToGitHub(req, res, id, profile, body) {
   // Strip the leading HTML comment block (the <!-- BLOG POST TEMPLATE ... --> note)
   const cleanTemplate = template.replace(/<!--[\s\S]*?-->\s*/, "");
 
-  const postHtml = cleanTemplate
+  let postHtml = cleanTemplate
     .replace(/\{\{TITLE\}\}/g,        esc(article.title))
     .replace(/\{\{DESCRIPTION\}\}/g,  esc(article.metaDescription || article.excerpt || ""))
     .replace(/\{\{SLUG\}\}/g,         slug)
@@ -379,6 +384,12 @@ async function publishToGitHub(req, res, id, profile, body) {
     .replace(/\{\{DATE_DISPLAY\}\}/g, esc(dateDisplay))
     .replace(/\{\{HERO_IMG\}\}/g,     esc(heroImg))
     .replace(/\{\{CONTENT\}\}/g,      articleBody); // body with inline images injected
+
+  // ---- 4b) Tracking injection (gtag + consent + cookie banner) ----
+  const gtagId = profile.tracking?.gtagId || "";
+  if (gtagId) {
+    postHtml = injectTracking(postHtml, gtagId, profile.primaryLanguage || "en");
+  }
 
   // ---- 5) Commit the post file ----
   const postPath = `blog/posts/${slug}.html`;
@@ -688,6 +699,72 @@ function injectInlineImages(body, img1, img2, alt1, alt2) {
     }
   }
   return body;
+}
+
+// =============================================================================
+//  TRACKING INJECTION (gtag + Consent Mode v2 + cookie banner)
+// =============================================================================
+// Injects Google tag + consent defaults into <head> and a language-aware cookie
+// consent banner before </body>. Only used for github-static posts — WordPress
+// themes handle their own <head>. The gtagId is per-tenant (variable), pulled
+// from profile.tracking.gtagId. If the HTML already contains googletagmanager,
+// injection is skipped (idempotent — won't conflict with site-level build
+// scripts like build-sitemap.js that also inject gtag).
+// -----------------------------------------------------------------------------
+const COOKIE_BANNER_TEXT = {
+  hu: { text: "Ez a weboldal s\u00FCtiket haszn\u00E1l a forgalom m\u00E9r\u00E9s\u00E9re \u00E9s a hirdet\u00E9sek optimaliz\u00E1l\u00E1s\u00E1ra.", accept: "Elfogadom", decline: "Elutas\u00EDtom" },
+  en: { text: "This website uses cookies to measure traffic and optimize ads.", accept: "Accept", decline: "Decline" },
+  es: { text: "Este sitio web utiliza cookies para medir el tr\u00E1fico y optimizar los anuncios.", accept: "Aceptar", decline: "Rechazar" },
+  de: { text: "Diese Website verwendet Cookies zur Messung des Datenverkehrs und zur Optimierung von Anzeigen.", accept: "Akzeptieren", decline: "Ablehnen" },
+  fr: { text: "Ce site utilise des cookies pour mesurer le trafic et optimiser les publicit\u00E9s.", accept: "Accepter", decline: "Refuser" },
+  it: { text: "Questo sito utilizza cookie per misurare il traffico e ottimizzare gli annunci.", accept: "Accetta", decline: "Rifiuta" },
+  pt: { text: "Este site utiliza cookies para medir o tr\u00E1fego e otimizar an\u00FAncios.", accept: "Aceitar", decline: "Recusar" },
+  nl: { text: "Deze website gebruikt cookies om verkeer te meten en advertenties te optimaliseren.", accept: "Accepteren", decline: "Weigeren" },
+  pl: { text: "Ta strona u\u017Cywa plik\u00F3w cookie do mierzenia ruchu i optymalizacji reklam.", accept: "Akceptuj\u0119", decline: "Odrzucam" },
+};
+
+function injectTracking(html, gtagId, lang) {
+  // Sanitize — only allow alphanumeric, hyphen, underscore
+  const safeId = String(gtagId).replace(/[^A-Za-z0-9\-_]/g, "");
+  if (!safeId) return html;
+
+  // Idempotent: skip if gtag is already present (e.g. from build-sitemap.js)
+  if (html.includes("googletagmanager.com/gtag/js")) return html;
+
+  const b = COOKIE_BANNER_TEXT[lang] || COOKIE_BANNER_TEXT.en;
+
+  const headSnippet = [
+    "<!-- Google tag (gtag.js) \u2014 injected by ABB -->",
+    "<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}",
+    "gtag('consent','default',{'ad_storage':'denied','ad_user_data':'denied','ad_personalization':'denied','analytics_storage':'denied'});</script>",
+    `<script async src="https://www.googletagmanager.com/gtag/js?id=${safeId}"></script>`,
+    `<script>gtag('js',new Date());gtag('config','${safeId}');</script>`,
+  ].join("\n");
+
+  const bannerSnippet = [
+    "<!-- Cookie consent banner \u2014 injected by ABB -->",
+    '<div id="abb-cookie-banner" style="position:fixed;bottom:0;left:0;right:0;background:#1e293b;color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:14px;z-index:9999;font-family:system-ui,-apple-system,sans-serif">',
+    `<p style="margin:0;flex:1">${b.text}</p>`,
+    '<div style="display:flex;gap:8px;flex-shrink:0">',
+    `<button onclick="abbGrant()" style="padding:8px 16px;border:0;border-radius:6px;background:#10b981;color:#fff;font-weight:600;cursor:pointer">${b.accept}</button>`,
+    `<button onclick="abbDeny()" style="padding:8px 16px;border:0;border-radius:6px;background:#64748b;color:#fff;font-weight:600;cursor:pointer">${b.decline}</button>`,
+    "</div></div>",
+    "<script>",
+    "function abbGrant(){gtag('consent','update',{'ad_storage':'granted','ad_user_data':'granted','ad_personalization':'granted','analytics_storage':'granted'});localStorage.setItem('cookie_consent','granted');document.getElementById('abb-cookie-banner').style.display='none'}",
+    "function abbDeny(){localStorage.setItem('cookie_consent','denied');document.getElementById('abb-cookie-banner').style.display='none'}",
+    "(function(){var c=localStorage.getItem('cookie_consent');if(c==='granted')abbGrant();else if(c==='denied')document.getElementById('abb-cookie-banner').style.display='none'})()",
+    "</script>",
+  ].join("\n");
+
+  // Inject before </head> and before </body>
+  if (html.includes("</head>")) {
+    html = html.replace("</head>", headSnippet + "\n</head>");
+  }
+  if (html.includes("</body>")) {
+    html = html.replace("</body>", bannerSnippet + "\n</body>");
+  }
+
+  return html;
 }
 
 // ---- Text/encoding utilities ----
