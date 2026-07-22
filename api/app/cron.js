@@ -28,6 +28,12 @@
 //    • VELOCITY GATE (Phase 7): daily cap enforced via publish-policy.js —
 //      new domains ramp up slowly, established tenants capped per config.
 //
+//  RETURN-EARLY:
+//    The handler sends 200 immediately so external pingers (cron-job.org)
+//    don't time out after ~30s. The Vercel function continues running in
+//    the background up to maxDuration (300s). Results are logged to the
+//    Vercel function log instead of the HTTP response body.
+//
 //  AUTH:  ?key=SECRET  or  x-app-secret header  or  Authorization: Bearer
 //         Accepts ABB_CRON_SECRET (recommended, optional) or ABB_APP_SECRET.
 // =============================================================================
@@ -53,6 +59,10 @@ export default async function handler(req, res) {
   const valid = provided && ((cronSecret && provided === cronSecret) || (appSecret && provided === appSecret));
   if (!valid) return res.status(401).json({ error: "Unauthorised." });
 
+  // ---- Return early: pinger gets 200 immediately ----
+  res.status(200).json({ ok: true, status: "accepted" });
+
+  // ---- Background processing (Vercel keeps running up to 300s) ----
   const BASE = process.env.SITE_BASE_URL || `https://${req.headers.host}`;
   const results = [];
   let publishedThisRun = false;
@@ -206,11 +216,10 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, ran: results.length, results });
+    console.log("[abb-cron] run complete:", JSON.stringify({ ran: results.length, results }));
 
   } catch (err) {
     console.error("abb-cron error:", err);
-    return res.status(500).json({ error: String(err && err.message || err) });
   }
 }
 
