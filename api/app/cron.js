@@ -28,6 +28,11 @@
 //    • VELOCITY GATE (Phase 7): daily cap enforced via publish-policy.js —
 //      new domains ramp up slowly, established tenants capped per config.
 //
+//  RETURN-EARLY (via Vercel waitUntil):
+//    Responds 200 immediately so cron-job.org doesn't time out after ~30s.
+//    waitUntil() tells Vercel to keep the function alive up to maxDuration
+//    (300s) for the actual processing. Results go to Vercel function logs.
+//
 //  AUTH:  ?key=SECRET  or  x-app-secret header  or  Authorization: Bearer
 //         Accepts ABB_CRON_SECRET (recommended, optional) or ABB_APP_SECRET.
 // =============================================================================
@@ -36,6 +41,7 @@ import { listTenants, getQueue, saveQueue, getPlan, savePlan, getHistory, getStr
 import { getProfile } from "./_profile.js";
 import { hasSecret } from "./_secrets.js";
 import { canPublishNow, recordPublish } from "../../lib/publish-policy.js";
+import { waitUntil } from "@vercel/functions";
 
 export const config = { maxDuration: 300 };
 
@@ -54,6 +60,19 @@ export default async function handler(req, res) {
   if (!valid) return res.status(401).json({ error: "Unauthorised." });
 
   const BASE = process.env.SITE_BASE_URL || `https://${req.headers.host}`;
+
+  // ---- Return early: pinger gets 200 immediately ----
+  res.status(200).json({ ok: true, status: "accepted" });
+
+  // ---- waitUntil keeps the function alive up to maxDuration (300s) ----
+  waitUntil(runCron(BASE, appSecret));
+}
+
+// =============================================================================
+//  All cron logic runs here, inside waitUntil — Vercel keeps the function
+//  alive even though the HTTP response was already sent.
+// =============================================================================
+async function runCron(BASE, appSecret) {
   const results = [];
   let publishedThisRun = false;
 
@@ -206,11 +225,10 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, ran: results.length, results });
+    console.log("[abb-cron] run complete:", JSON.stringify({ ran: results.length, results }));
 
   } catch (err) {
     console.error("abb-cron error:", err);
-    return res.status(500).json({ error: String(err && err.message || err) });
   }
 }
 
