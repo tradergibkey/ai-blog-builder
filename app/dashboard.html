@@ -374,20 +374,21 @@ function drawCalendar(byDate, pubDates) {
   for (var d=1; d<=daysInMonth; d++) {
     var ds = y + '-' + String(m+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
     var items = byDate[ds] || [];
-    var cls = "day" + (items.length?" has":"") + (pubDates.has(ds)?" published":"") + (ds===todayStr?" today":"");
+    var isPublished = pubDates.has(ds);
+    // Published wins — solid green, no half-and-half split
+    var cls = "day" + (items.length && !isPublished ? " has" : "") + (isPublished ? " published" : "") + (ds===todayStr ? " today" : "");
 
     // Build cell content
     var cellContent = "";
 
-    // Show plan target time on today's cell if plan is pending/publishing
-    if (ds === todayStr && calPlan && (calPlan.status === "pending" || calPlan.status === "publishing") && calPlan.target) {
-      cellContent += '<div class="plan-time">\u23F3 ' + escapeHtml(calPlan.target) + '</div>';
-    }
-
-    if (items.length) {
-      cellContent += '<div class="topic">' + escapeHtml(items[0].topic||"") + '</div>';
-    } else if (pubDates.has(ds)) {
+    // Today's cell: show plan topic + time (not the queue's first item)
+    if (ds === todayStr && calPlan && (calPlan.status === "pending" || calPlan.status === "publishing")) {
+      if (calPlan.target) cellContent += '<div class="plan-time">\u23F3 ' + escapeHtml(calPlan.target) + '</div>';
+      if (calPlan.topic) cellContent += '<div class="topic">' + escapeHtml(calPlan.topic) + '</div>';
+    } else if (isPublished) {
       cellContent += '<div class="topic" style="color:var(--ok)">\u2713 Published</div>';
+    } else if (items.length) {
+      cellContent += '<div class="topic">' + escapeHtml(items[0].topic||"") + '</div>';
     }
 
     html += '<div class="' + cls + '"><div class="dn">' + d + '</div>' + cellContent + '</div>';
