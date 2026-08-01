@@ -386,6 +386,39 @@ code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
     </label>
   </div>
 
+  <!-- ═══ AUTHOR / EXPERT (E-E-A-T) ═══ -->
+  <div style="margin-bottom:18px;padding-top:8px;border-top:1px solid var(--line)">
+    <span class="lbl" style="display:block;margin-bottom:4px">Author / Expert <span style="font-size:11px;color:var(--faint);font-weight:400">(recommended for SEO)</span></span>
+    <span class="hint" style="display:block;font-size:12px;color:var(--faint);margin-bottom:14px">Every article gets a visible byline and structured data — Google's E-E-A-T quality signal.</span>
+
+    <label class="field" id="f_authorName"><span class="lbl">Author name</span>
+      <input type="text" id="authorName" placeholder="e.g. Kov&aacute;cs J&aacute;nos">
+    </label>
+    <label class="field" id="f_authorTitle"><span class="lbl">Title / role</span>
+      <span class="hint">What makes them an expert on this topic.</span>
+      <input type="text" id="authorTitle" placeholder="e.g. K&#337;farag&oacute; mester, 25 &eacute;v tapasztalattal">
+    </label>
+    <label class="field" id="f_authorBio"><span class="lbl">Short bio</span>
+      <span class="hint">2-3 sentences. Appears in structured data, not on the page.</span>
+      <textarea id="authorBio" placeholder="Brief background, credentials, experience…" style="min-height:60px"></textarea>
+    </label>
+    <label class="field" id="f_authorPhoto"><span class="lbl">Author photo URL <span style="font-size:11px;color:var(--faint);font-weight:400">(optional)</span></span>
+      <span class="hint">Full URL to a headshot hosted on your site (e.g. https://yoursite.com/img/author.jpg).</span>
+      <input type="url" id="authorPhoto" placeholder="https://…">
+    </label>
+
+    <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
+      <span class="lbl" style="display:block;margin-bottom:4px">Reviewer <span style="font-size:11px;color:var(--faint);font-weight:400">(optional)</span></span>
+      <span class="hint" style="display:block;font-size:12px;color:var(--faint);margin-bottom:10px">Adds a "Reviewed by" credit at the end of each article — strong trust signal.</span>
+      <label class="field" id="f_reviewerName"><span class="lbl">Reviewer name</span>
+        <input type="text" id="reviewerName" placeholder="e.g. Dr. Nagy P&eacute;ter">
+      </label>
+      <label class="field" id="f_reviewerTitle"><span class="lbl">Reviewer title</span>
+        <input type="text" id="reviewerTitle" placeholder="e.g. Restaur&aacute;tor szak&eacute;rt&#337;">
+      </label>
+    </div>
+  </div>
+
   <div class="btn-row">
     <button class="btn btn-ghost" onclick="goStep(2)">← Back</button>
     <button class="btn btn-primary" onclick="tryStep(4)">Continue →</button>
@@ -936,6 +969,8 @@ function renderReview(){
     ["Publishing",autoLabel],
     ["Internal linking",$("authorityToggle").checked?"Enabled":"Off"],
     ["Tracking",trackingLabel],
+    ["Author",$("authorName").value.trim()?esc($("authorName").value.trim())+($("authorTitle").value.trim()?" \u2014 "+esc($("authorTitle").value.trim()):""):'<span style="color:var(--warn)">Not set \u2014 no byline on articles</span>'],
+    ["Reviewer",$("reviewerName").value.trim()?esc($("reviewerName").value.trim())+($("reviewerTitle").value.trim()?", "+esc($("reviewerTitle").value.trim()):""):"None"],
   ];
   $("reviewSummary").innerHTML=rows.map(([k,v])=>`<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
 }
@@ -984,6 +1019,14 @@ async function saveProfile(){
     cadence:cadence,
     authority:{enabled:$("authorityToggle").checked,features:[]},
     tracking:{gtagId:gtagVal||null},
+    author:{
+      name:$("authorName").value.trim()||null,
+      title:$("authorTitle").value.trim()||null,
+      bio:$("authorBio").value.trim()||null,
+      photoUrl:$("authorPhoto").value.trim()||null,
+      reviewerName:$("reviewerName").value.trim()||null,
+      reviewerTitle:$("reviewerTitle").value.trim()||null,
+    },
     referralSource:$("referral").value==="other"?("other: "+$("referralOther").value.trim()):$("referral").value,
   };
 
