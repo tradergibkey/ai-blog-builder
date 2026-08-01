@@ -354,9 +354,19 @@ async function publishToGitHub(req, res, id, profile, body) {
     }
   }
 
+  // E-E-A-T: reviewer line (before FAQ, at end of article body)
+  if (profile.author?.reviewerName) {
+    articleBody = appendReviewerLine(articleBody, profile.author, profile.primaryLanguage || "en");
+  }
+
   // FAQ section (Phase 5b) — visible HTML + FAQPage JSON-LD for AI citations
   if (article.faq && article.faq.length) {
     articleBody = appendFaq(articleBody, article.faq);
+  }
+
+  // E-E-A-T: byline block (prepended to top of article content)
+  if (profile.author?.name) {
+    articleBody = prependByline(articleBody, profile.author, dateDisplay);
   }
 
   // ---- 3) Build slug + dates ----
@@ -389,6 +399,11 @@ async function publishToGitHub(req, res, id, profile, body) {
   const gtagId = profile.tracking?.gtagId || "";
   if (gtagId) {
     postHtml = injectTracking(postHtml, gtagId, profile.primaryLanguage || "en");
+  }
+
+  // ---- 4c) E-E-A-T: Article + Author schema (JSON-LD in <head>) ----
+  if (profile.author?.name) {
+    postHtml = injectAuthorSchema(postHtml, profile.author, article.title, dateIso, heroImg);
   }
 
   // ---- 5) Commit the post file ----
@@ -764,6 +779,89 @@ function injectTracking(html, gtagId, lang) {
     html = html.replace("</body>", bannerSnippet + "\n</body>");
   }
 
+  return html;
+}
+
+// =============================================================================
+//  E-E-A-T SCAFFOLDING (byline, reviewer, Article schema)
+// =============================================================================
+// Adds author credibility signals to github-static posts. Per-tenant author
+// profile (name, title, bio, photo, optional reviewer) stored in
+// profile.author. Byline goes at top of article content, reviewer line at
+// bottom (before FAQ), Article + Person JSON-LD in <head>.
+// -----------------------------------------------------------------------------
+const REVIEWER_LABELS = {
+  hu: "Szak\u00E9rt\u0151i ellen\u0151rz\u00E9s",
+  en: "Reviewed by",
+  es: "Revisado por",
+  de: "Gepr\u00FCft von",
+  fr: "R\u00E9vis\u00E9 par",
+  it: "Revisionato da",
+  pt: "Revisado por",
+  nl: "Beoordeeld door",
+  pl: "Zweryfikowane przez",
+};
+
+function prependByline(body, author, dateDisplay) {
+  if (!author || !author.name) return body;
+  const photoHtml = author.photoUrl
+    ? `<img src="${esc(author.photoUrl)}" alt="${esc(author.name)}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+    : "";
+  const titleHtml = author.title
+    ? `<span style="display:block;font-size:13px;color:#64748b">${esc(author.title)}</span>`
+    : "";
+  const byline = [
+    '<div class="author-byline" style="display:flex;align-items:center;gap:14px;padding:16px 0;margin-bottom:20px;border-bottom:1px solid #e2e8f0;font-family:system-ui,-apple-system,sans-serif">',
+    photoHtml,
+    '<div>',
+    `<strong style="font-size:15px">${esc(author.name)}</strong>`,
+    titleHtml,
+    `<span style="display:block;font-size:12px;color:#94a3b8">${esc(dateDisplay)}</span>`,
+    '</div>',
+    '</div>',
+  ].join("\n");
+  return byline + "\n" + body;
+}
+
+function appendReviewerLine(body, author, lang) {
+  if (!author || !author.reviewerName) return body;
+  const label = REVIEWER_LABELS[lang] || REVIEWER_LABELS.en;
+  const titlePart = author.reviewerTitle ? `, ${esc(author.reviewerTitle)}` : "";
+  const html = `\n<p class="reviewer-line" style="font-size:13px;color:#64748b;margin-top:28px;padding-top:14px;border-top:1px solid #e2e8f0;font-style:italic;font-family:system-ui,-apple-system,sans-serif">${esc(label)}: <strong>${esc(author.reviewerName)}</strong>${titlePart}</p>\n`;
+  return body + html;
+}
+
+function injectAuthorSchema(html, author, articleTitle, dateIso, heroImg) {
+  if (!author || !author.name) return html;
+
+  const authorObj = {
+    "@type": "Person",
+    "name": author.name,
+  };
+  if (author.title) authorObj.jobTitle = author.title;
+  if (author.bio) authorObj.description = author.bio;
+  if (author.photoUrl) authorObj.image = author.photoUrl;
+
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": articleTitle,
+    "datePublished": dateIso,
+    "author": authorObj,
+  };
+  if (heroImg) schema.image = heroImg;
+
+  if (author.reviewerName) {
+    const reviewerObj = { "@type": "Person", "name": author.reviewerName };
+    if (author.reviewerTitle) reviewerObj.jobTitle = author.reviewerTitle;
+    schema.reviewedBy = reviewerObj;
+  }
+
+  const snippet = `\n<!-- Article + Author schema \u2014 injected by ABB -->\n<script type="application/ld+json">${JSON.stringify(schema)}</script>\n`;
+
+  if (html.includes("</head>")) {
+    html = html.replace("</head>", snippet + "</head>");
+  }
   return html;
 }
 
