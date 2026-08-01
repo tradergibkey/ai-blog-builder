@@ -386,7 +386,8 @@ function drawCalendar(byDate, pubDates) {
       if (calPlan.target) cellContent += '<div class="plan-time">\u23F3 ' + escapeHtml(calPlan.target) + '</div>';
       if (calPlan.topic) cellContent += '<div class="topic">' + escapeHtml(calPlan.topic) + '</div>';
     } else if (isPublished) {
-      cellContent += '<div class="topic" style="color:var(--ok)">\u2713 Published</div>';
+      var pubTime = getPubTime(ds);
+      cellContent += '<div class="plan-time" style="color:var(--ok)">\u2713 ' + (pubTime || 'Published') + '</div>';
     } else if (items.length) {
       cellContent += '<div class="topic">' + escapeHtml(items[0].topic||"") + '</div>';
     }
@@ -396,6 +397,18 @@ function drawCalendar(byDate, pubDates) {
   html += '</div>';
   mount.innerHTML = html;
   mount._byDate = byDate;
+}
+
+// Look up the publish time (HH:MM in browser local tz) for a given date
+function getPubTime(dateStr) {
+  for (var i = 0; i < (calHistory || []).length; i++) {
+    var h = calHistory[i];
+    if ((h.published_at || "").slice(0, 10) === dateStr) {
+      var dt = new Date(h.published_at);
+      if (!isNaN(dt.getTime())) return String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+    }
+  }
+  return null;
 }
 
 function calMove(delta) {
