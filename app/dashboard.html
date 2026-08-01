@@ -27,7 +27,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 var(--font-bod
 h1,h2,h3{font-family:var(--font-display);margin:0;line-height:1.2;letter-spacing:-.01em}
 p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:underline}
 
-/* ═══ Layout: sidebar + main ═══ */
+/* Layout: sidebar + main */
 .app{display:flex;min-height:100vh}
 .sidebar{width:230px;min-width:230px;background:var(--surface);border-right:1px solid var(--line);padding:24px 14px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
 .side-logo{font-family:var(--font-display);font-weight:800;font-size:18px;padding:0 12px 20px;color:var(--ink)}
@@ -44,7 +44,7 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .live-pill{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;border-radius:999px;background:var(--ok-bg);color:var(--ok);font-weight:700;font-size:13px}
 .live-pill::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok)}
 
-/* ═══ Buttons (emlektabla pattern) ═══ */
+/* Buttons */
 .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:14px;font-weight:700;font-size:14.5px;font-family:var(--font-body);cursor:pointer;border:none;transition:transform .15s,box-shadow .15s,filter .15s;text-decoration:none}
 .btn:hover{transform:translateY(-2px);text-decoration:none}
 .btn-primary{background:var(--grad);color:#fff;box-shadow:var(--shadow)}
@@ -53,7 +53,7 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .btn-outline:hover{border-color:var(--violet);color:var(--violet)}
 .btn-sm{padding:9px 16px;font-size:13.5px;border-radius:11px}
 
-/* ═══ Gate ═══ */
+/* Gate */
 .gate{max-width:460px;margin:12vh auto 0;text-align:center;padding:0 20px}
 .gate h1{font-size:26px;margin-bottom:8px}
 .gate .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
@@ -67,7 +67,7 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .msg.ok{background:var(--ok-bg);color:var(--ok)}.msg.err{background:var(--err-bg);color:var(--err)}
 .msg.info{background:var(--grad-soft);color:var(--violet)}.msg.warn{background:var(--warn-bg);color:var(--warn)}
 
-/* ═══ Panels & cards ═══ */
+/* Panels & cards */
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px;margin-bottom:22px;box-shadow:0 4px 16px rgba(20,20,20,.05)}
 .panel-title{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:800;font-size:16px;margin-bottom:18px}
 .panel-title .pico{width:30px;height:30px;border-radius:9px;background:var(--grad-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
@@ -85,18 +85,18 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .badge.paused{background:var(--warn-bg);color:var(--warn)}
 .tcard-meta{display:flex;gap:8px;flex-wrap:wrap}
 
-/* ═══ Stats row ═══ */
+/* Stats row */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:22px}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;position:relative;overflow:hidden}
 .stat .n{font-family:var(--font-display);font-size:30px;font-weight:800;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .stat .l{font-family:var(--font-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.16em;margin-top:4px}
 
-/* ═══ Detail head ═══ */
+/* Detail head */
 .back{background:none;border:0;color:var(--violet);font-size:14px;font-weight:700;cursor:pointer;padding:0;margin-bottom:18px;font-family:var(--font-body)}
 .detail-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:22px}
 .detail-head h2{font-size:23px}
 
-/* ═══ Calendar ═══ */
+/* Calendar */
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
 .cal .dow{font-family:var(--font-mono);font-size:10px;font-weight:700;color:var(--muted);text-align:center;text-transform:uppercase;letter-spacing:.1em;padding:5px 0}
 .cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:10px;padding:5px 6px;font-size:12px;min-height:48px;background:var(--surface)}
@@ -107,12 +107,13 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .cal .day.has.published{background:linear-gradient(135deg,var(--ok-bg) 50%,rgba(227,117,53,.12) 50%);border-color:rgba(21,128,61,.4)}
 .cal .day.today{box-shadow:0 0 0 2px var(--violet)}
 .cal .day .topic{font-size:9px;line-height:1.25;color:var(--violet);margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-weight:600}
+.cal .day .plan-time{font-family:var(--font-mono);font-size:9px;font-weight:700;color:var(--orange);margin-top:2px}
 .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .cal-nav button{background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:7px 14px;cursor:pointer;font-weight:700;font-size:14px;color:var(--ink)}
 .cal-nav button:hover{border-color:var(--violet);color:var(--violet)}
 .cal-nav .mlabel{font-family:var(--font-display);font-weight:800;font-size:15px}
 
-/* ═══ History ═══ */
+/* History */
 .hist{list-style:none;padding:0;margin:0}
 .hist li{padding:13px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
 .hist li:last-child{border-bottom:none}
@@ -131,7 +132,7 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 </head>
 <body>
 
-<!-- ═══ GATE ═══ -->
+<!-- GATE -->
 <div id="gate" class="gate">
   <h1>AI Blog Builder <span class="grad-text">Dashboard</span></h1>
   <p>Enter your operator secret to view all tenants.</p>
@@ -147,7 +148,7 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
   <div id="gateMsg" class="msg"></div>
 </div>
 
-<!-- ═══ APP ═══ -->
+<!-- APP -->
 <div id="app" class="app" style="display:none">
   <aside class="sidebar">
     <div class="side-logo">AI Blog<span class="dot">Builder</span></div>
@@ -181,31 +182,31 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 </div>
 
 <script>
-const $ = (id) => document.getElementById(id);
-const API = "/api/app";
-let SECRET = "";
-let TENANTS = [];
+var $ = function(id) { return document.getElementById(id); };
+var API = "/api/app";
+var SECRET = "";
+var TENANTS = [];
 
 // Auto-login from sessionStorage (shared across dashboard + setup)
 (function autoLogin() {
   try {
-    const saved = sessionStorage.getItem("abb_secret");
+    var saved = sessionStorage.getItem("abb_secret");
     if (saved) { $("gateKey").value = saved; verifyGate(); }
   } catch(e) {}
 })();
 
 async function api(method, path) {
-  const r = await fetch(API + path, { method, headers: { "x-app-secret": SECRET } });
-  const data = await r.json().catch(() => ({}));
-  return { ok: r.ok, status: r.status, data };
+  var r = await fetch(API + path, { method: method, headers: { "x-app-secret": SECRET } });
+  var data = await r.json().catch(function() { return {}; });
+  return { ok: r.ok, status: r.status, data: data };
 }
 
 async function verifyGate() {
-  const key = $("gateKey").value.trim();
+  var key = $("gateKey").value.trim();
   if (!key) { showMsg("gateMsg","err","Enter your operator secret."); return; }
-  $("gateBtn").disabled = true; $("gateBtn").textContent = "Checking…";
+  $("gateBtn").disabled = true; $("gateBtn").textContent = "Checking\u2026";
   SECRET = key;
-  const r = await api("GET", "/tenants");
+  var r = await api("GET", "/tenants");
   $("gateBtn").disabled = false; $("gateBtn").textContent = "Enter";
   if (r.ok && r.data.ok) {
     try { sessionStorage.setItem("abb_secret", key); } catch(e) {}
@@ -219,151 +220,179 @@ async function verifyGate() {
   }
 }
 
-function showMsg(id, kind, text) { const e=$(id); e.className="msg show "+kind; e.textContent=text; }
+function showMsg(id, kind, text) { var e=$(id); e.className="msg show "+kind; e.textContent=text; }
 
 async function loadTenants() {
   showList();
   $("tenantList").className = "spinner";
-  $("tenantList").textContent = "Loading tenants…";
-  const r = await api("GET", "/tenants");
+  $("tenantList").textContent = "Loading tenants\u2026";
+  var r = await api("GET", "/tenants");
   if (r.ok && r.data.ok) { TENANTS = r.data.tenants || []; renderTenants(TENANTS); }
   else { $("tenantList").className=""; $("tenantList").innerHTML = '<div class="empty">Could not load tenants.</div>'; }
 }
 
 function renderTenants(tenants) {
   // Global stats
-  const active = tenants.filter(t => t.status === "active").length;
-  $("globalStats").innerHTML = `
-    <div class="stat"><div class="n">${tenants.length}</div><div class="l">Tenants</div></div>
-    <div class="stat"><div class="n">${active}</div><div class="l">Active</div></div>
-    <div class="stat"><div class="n">${tenants.length - active}</div><div class="l">Paused</div></div>`;
+  var active = tenants.filter(function(t) { return t.status === "active"; }).length;
+  $("globalStats").innerHTML =
+    '<div class="stat"><div class="n">' + tenants.length + '</div><div class="l">Tenants</div></div>' +
+    '<div class="stat"><div class="n">' + active + '</div><div class="l">Active</div></div>' +
+    '<div class="stat"><div class="n">' + (tenants.length - active) + '</div><div class="l">Paused</div></div>';
 
-  const el = $("tenantList");
-  if (!tenants.length) { el.className=""; el.innerHTML = '<div class="empty">No tenants yet. <a href="/app/index.html">Add your first one →</a></div>'; return; }
+  var el = $("tenantList");
+  if (!tenants.length) { el.className=""; el.innerHTML = '<div class="empty">No tenants yet. <a href="/app/index.html">Add your first one \u2192</a></div>'; return; }
   el.className = "tenants";
-  el.innerHTML = tenants.map(t => `
-    <div class="tcard" onclick="openTenant('${encodeURIComponent(t.id)}')">
-      <h3>${escapeHtml(t.siteName || t.id)}</h3>
-      <div class="url">${escapeHtml(t.id)}</div>
-      <div class="tcard-meta">
-        <span class="badge ${t.status==='active'?'active':'paused'}">${escapeHtml(t.status||'active')}</span>
-      </div>
-    </div>`).join("");
+  el.innerHTML = tenants.map(function(t) {
+    return '<div class="tcard" onclick="openTenant(\'' + encodeURIComponent(t.id) + '\')">' +
+      '<h3>' + escapeHtml(t.siteName || t.id) + '</h3>' +
+      '<div class="url">' + escapeHtml(t.id) + '</div>' +
+      '<div class="tcard-meta"><span class="badge ' + (t.status==='active'?'active':'paused') + '">' + escapeHtml(t.status||'active') + '</span></div></div>';
+  }).join("");
 }
 
 function showList() { $("listView").style.display="block"; $("detailView").style.display="none"; calRef=null; }
 
 async function openTenant(encId) {
-  const id = decodeURIComponent(encId);
+  var id = decodeURIComponent(encId);
   $("listView").style.display = "none";
   $("detailView").style.display = "block";
-  $("detailBody").innerHTML = '<div class="spinner">Loading '+escapeHtml(id)+'…</div>';
+  $("detailBody").innerHTML = '<div class="spinner">Loading ' + escapeHtml(id) + '\u2026</div>';
 
-  const [profRes, queueRes] = await Promise.all([
+  var results = await Promise.all([
     api("GET", "/tenants?id=" + encodeURIComponent(id)),
     api("GET", "/queue?id=" + encodeURIComponent(id)),
   ]);
 
-  const profile = profRes.ok && profRes.data.ok ? profRes.data.profile : {};
-  const q = queueRes.ok && queueRes.data.ok ? queueRes.data : { queue:[], history:[], plan:null };
+  var profRes = results[0];
+  var queueRes = results[1];
+  var profile = profRes.ok && profRes.data.ok ? profRes.data.profile : {};
+  var q = queueRes.ok && queueRes.data.ok ? queueRes.data : { queue:[], history:[], plan:null };
   renderDetail(id, profile, q);
 }
 
 function renderDetail(id, profile, q) {
-  const queue = q.queue || [];
-  const history = q.history || [];
-  const plan = q.plan;
-  const intType = profile.integration?.type || "wordpress";
-  const intBadge = intType==="github-static" ? '<span class="badge gh">GitHub</span>' : '<span class="badge wp">WordPress</span>';
-  const nextItem = queue.find(e => e.date) || queue[0];
-  const nextDate = nextItem?.date || "—";
-  const linking = profile.authority?.enabled ? "On" : "Off";
+  var queue = q.queue || [];
+  var history = q.history || [];
+  var plan = q.plan;
+  var intType = (profile.integration && profile.integration.type) || "wordpress";
+  var intBadge = intType==="github-static" ? '<span class="badge gh">GitHub</span>' : '<span class="badge wp">WordPress</span>';
+  var linking = (profile.authority && profile.authority.enabled) ? "On" : "Off";
 
-  let html = `
-    <div class="detail-head">
-      <h2>${escapeHtml(profile.siteName || id)}</h2>
-      <div style="display:flex;gap:8px;align-items:center">${intBadge}
-        <span class="badge ${profile.status==='active'?'active':'paused'}">${escapeHtml(profile.status||'active')}</span></div>
-    </div>
-    <div class="stats">
-      <div class="stat"><div class="n">${queue.length}</div><div class="l">Queued</div></div>
-      <div class="stat"><div class="n">${history.length}</div><div class="l">Published</div></div>
-      <div class="stat"><div class="n" style="font-size:19px;padding-top:8px">${nextDate}</div><div class="l">Next up</div></div>
-      <div class="stat"><div class="n">${escapeHtml((profile.primaryLanguage||'—').toUpperCase())}</div><div class="l">Language</div></div>
-      <div class="stat"><div class="n" style="font-size:22px;padding-top:5px">${linking}</div><div class="l">Int. links</div></div>
-    </div>`;
+  // ── "Next Up" stat: show plan target time if pending, otherwise next queue date ──
+  var nextUpDisplay = "\u2014";
+  var nextUpLabel = "Next up";
+  if (plan && (plan.status === "pending" || plan.status === "publishing") && plan.target) {
+    nextUpDisplay = plan.target;
+    nextUpLabel = "Publishes at";
+  } else if (plan && plan.status === "done") {
+    // Today's done — show next queue item date
+    var nextItem = queue.length ? (queue.find(function(e) { return e.date; }) || queue[0]) : null;
+    nextUpDisplay = nextItem && nextItem.date ? nextItem.date : "\u2713 Done";
+    nextUpLabel = "Next up";
+  } else {
+    var nextItem2 = queue.length ? (queue.find(function(e) { return e.date; }) || queue[0]) : null;
+    nextUpDisplay = nextItem2 && nextItem2.date ? nextItem2.date : "\u2014";
+  }
+
+  var html = '<div class="detail-head">' +
+    '<h2>' + escapeHtml(profile.siteName || id) + '</h2>' +
+    '<div style="display:flex;gap:8px;align-items:center">' + intBadge +
+    '<span class="badge ' + ((profile.status||'active')==='active'?'active':'paused') + '">' + escapeHtml(profile.status||'active') + '</span></div></div>' +
+    '<div class="stats">' +
+    '<div class="stat"><div class="n">' + queue.length + '</div><div class="l">Queued</div></div>' +
+    '<div class="stat"><div class="n">' + history.length + '</div><div class="l">Published</div></div>' +
+    '<div class="stat"><div class="n" style="font-size:' + (nextUpDisplay.length <= 5 ? '30' : '19') + 'px;padding-top:' + (nextUpDisplay.length <= 5 ? '0' : '8') + 'px">' + escapeHtml(nextUpDisplay) + '</div><div class="l">' + escapeHtml(nextUpLabel) + '</div></div>' +
+    '<div class="stat"><div class="n">' + escapeHtml((profile.primaryLanguage||'\u2014').toUpperCase()) + '</div><div class="l">Language</div></div>' +
+    '<div class="stat"><div class="n" style="font-size:22px;padding-top:5px">' + linking + '</div><div class="l">Int. links</div></div>' +
+    '</div>';
 
   if (plan) {
-    const ps = plan.status || "—";
-    html += `<div class="msg info show" style="margin:0 0 22px">Today's plan: <strong>${escapeHtml(ps)}</strong>${plan.target?` · target ${escapeHtml(plan.target)}`:""}${plan.topic?` · ${escapeHtml(plan.topic)}`:""}</div>`;
+    var ps = plan.status || "\u2014";
+    var planParts = "Today\u2019s plan: <strong>" + escapeHtml(ps) + "</strong>";
+    if (plan.target) planParts += " \u00B7 target " + escapeHtml(plan.target);
+    if (plan.topic) planParts += " \u00B7 " + escapeHtml(plan.topic);
+    html += '<div class="msg info show" style="margin:0 0 22px">' + planParts + '</div>';
   }
 
-  html += `<div class="panel"><div class="panel-title"><span class="pico">▤</span> Content calendar</div><div id="calMount"></div></div>`;
+  html += '<div class="panel"><div class="panel-title"><span class="pico">\u25A4</span> Content calendar</div><div id="calMount"></div></div>';
 
-  html += `<div class="panel"><div class="panel-title"><span class="pico">✓</span> Recent posts</div>`;
-  if (!history.length) html += `<div class="empty">No posts published yet.</div>`;
+  html += '<div class="panel"><div class="panel-title"><span class="pico">\u2713</span> Recent posts</div>';
+  if (!history.length) html += '<div class="empty">No posts published yet.</div>';
   else {
-    html += `<ul class="hist">` + history.slice(0,15).map(h => {
-      const d = (h.published_at||"").slice(0,10);
-      const url = h.url ? (h.url.startsWith("http")?h.url:"https://"+h.url) : null;
-      const title = escapeHtml(h.title||h.topic||"Untitled");
-      return `<li>
-        <span class="ht">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${title}</a>`:title}</span>
-        <span class="hd">${escapeHtml(d)}</span>
-      </li>`;
-    }).join("") + `</ul>`;
+    html += '<ul class="hist">' + history.slice(0,15).map(function(h) {
+      var d = (h.published_at||"").slice(0,10);
+      var url = h.url ? (h.url.startsWith("http")?h.url:"https://"+h.url) : null;
+      var title = escapeHtml(h.title||h.topic||"Untitled");
+      return '<li><span class="ht">' + (url ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + title + '</a>' : title) + '</span><span class="hd">' + escapeHtml(d) + '</span></li>';
+    }).join("") + '</ul>';
   }
-  html += `</div>`;
+  html += '</div>';
 
   $("detailBody").innerHTML = html;
-  renderCalendar(queue, history);
+  renderCalendar(queue, history, plan);
 }
 
 /* ─── Calendar ─── */
-let calRef = null;
-let calHistory = [];
-function renderCalendar(queue, history) {
-  const byDate = {};
-  queue.forEach(e => { if (e.date) (byDate[e.date] = byDate[e.date] || []).push(e); });
-  // Published dates from history
-  const pubDates = new Set();
-  (history || calHistory || []).forEach(h => {
-    const d = (h.published_at||"").slice(0,10);
+var calRef = null;
+var calHistory = [];
+var calPlan = null;
+
+function renderCalendar(queue, history, plan) {
+  var byDate = {};
+  queue.forEach(function(e) { if (e.date) { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e); } });
+  var pubDates = new Set();
+  (history || calHistory || []).forEach(function(h) {
+    var d = (h.published_at||"").slice(0,10);
     if (d) pubDates.add(d);
   });
   calHistory = history || calHistory;
-  const dates = Object.keys(byDate).sort();
-  const first = dates[0] || new Date().toISOString().slice(0,10);
-  if (!calRef) { const [y,m] = first.split("-").map(Number); calRef = { y, m:m-1 }; }
+  calPlan = plan || null;
+  var dates = Object.keys(byDate).sort();
+  var first = dates[0] || new Date().toISOString().slice(0,10);
+  if (!calRef) { var parts = first.split("-"); calRef = { y: parseInt(parts[0]), m: parseInt(parts[1]) - 1 }; }
   drawCalendar(byDate, pubDates);
 }
 
 function drawCalendar(byDate, pubDates) {
-  const mount = $("calMount");
+  var mount = $("calMount");
   if (!mount) return;
   pubDates = pubDates || new Set();
-  const y = calRef.y, m = calRef.m;
-  const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const first = new Date(Date.UTC(y, m, 1));
-  const startDow = (first.getUTCDay() + 6) % 7;
-  const daysInMonth = new Date(Date.UTC(y, m+1, 0)).getUTCDate();
-  const todayStr = new Date().toISOString().slice(0,10);
+  var y = calRef.y, m = calRef.m;
+  var monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  var first = new Date(Date.UTC(y, m, 1));
+  var startDow = (first.getUTCDay() + 6) % 7;
+  var daysInMonth = new Date(Date.UTC(y, m+1, 0)).getUTCDate();
+  var todayStr = new Date().toISOString().slice(0,10);
 
-  let html = `<div class="cal-nav">
-    <button onclick="calMove(-1)">←</button>
-    <span class="mlabel">${monthNames[m]} ${y}</span>
-    <button onclick="calMove(1)">→</button>
-  </div><div class="cal">`;
-  ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].forEach(d => html += `<div class="dow">${d}</div>`);
-  for (let i=0;i<startDow;i++) html += `<div class="day empty"></div>`;
-  for (let d=1; d<=daysInMonth; d++) {
-    const ds = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-    const items = byDate[ds] || [];
-    const cls = "day" + (items.length?" has":"") + (pubDates.has(ds)?" published":"") + (ds===todayStr?" today":"");
-    const topic = items.length ? `<div class="topic">${escapeHtml(items[0].topic||"")}</div>` : (pubDates.has(ds) ? `<div class="topic" style="color:var(--ok)">✓ Published</div>` : "");
-    html += `<div class="${cls}"><div class="dn">${d}</div>${topic}</div>`;
+  var html = '<div class="cal-nav">' +
+    '<button onclick="calMove(-1)">\u2190</button>' +
+    '<span class="mlabel">' + monthNames[m] + ' ' + y + '</span>' +
+    '<button onclick="calMove(1)">\u2192</button>' +
+    '</div><div class="cal">';
+  ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].forEach(function(d) { html += '<div class="dow">' + d + '</div>'; });
+  for (var i=0; i<startDow; i++) html += '<div class="day empty"></div>';
+  for (var d=1; d<=daysInMonth; d++) {
+    var ds = y + '-' + String(m+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    var items = byDate[ds] || [];
+    var cls = "day" + (items.length?" has":"") + (pubDates.has(ds)?" published":"") + (ds===todayStr?" today":"");
+
+    // Build cell content
+    var cellContent = "";
+
+    // Show plan target time on today's cell if plan is pending/publishing
+    if (ds === todayStr && calPlan && (calPlan.status === "pending" || calPlan.status === "publishing") && calPlan.target) {
+      cellContent += '<div class="plan-time">\u23F3 ' + escapeHtml(calPlan.target) + '</div>';
+    }
+
+    if (items.length) {
+      cellContent += '<div class="topic">' + escapeHtml(items[0].topic||"") + '</div>';
+    } else if (pubDates.has(ds)) {
+      cellContent += '<div class="topic" style="color:var(--ok)">\u2713 Published</div>';
+    }
+
+    html += '<div class="' + cls + '"><div class="dn">' + d + '</div>' + cellContent + '</div>';
   }
-  html += `</div>`;
+  html += '</div>';
   mount.innerHTML = html;
   mount._byDate = byDate;
 }
@@ -372,9 +401,9 @@ function calMove(delta) {
   calRef.m += delta;
   if (calRef.m < 0) { calRef.m = 11; calRef.y--; }
   if (calRef.m > 11) { calRef.m = 0; calRef.y++; }
-  const mount = $("calMount");
-  const pubDates = new Set();
-  (calHistory||[]).forEach(h => { const d=(h.published_at||"").slice(0,10); if(d) pubDates.add(d); });
+  var mount = $("calMount");
+  var pubDates = new Set();
+  (calHistory||[]).forEach(function(h) { var d=(h.published_at||"").slice(0,10); if(d) pubDates.add(d); });
   drawCalendar(mount._byDate || {}, pubDates);
 }
 
