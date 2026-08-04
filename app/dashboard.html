@@ -90,6 +90,16 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;position:relative;overflow:hidden}
 .stat .n{font-family:var(--font-display);font-size:30px;font-weight:800;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .stat .l{font-family:var(--font-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.16em;margin-top:4px}
+.stat.clickable{cursor:pointer;transition:transform .15s,box-shadow .15s,border-color .15s}
+.stat.clickable:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:var(--violet)}
+.stat.clickable[data-busy="1"]{opacity:.55;pointer-events:none}
+.stat .hint{font-family:var(--font-mono);font-size:9px;color:var(--muted);letter-spacing:.1em;margin-top:6px;opacity:.7}
+
+/* Toast */
+.toast{position:fixed;right:22px;bottom:22px;padding:12px 18px;border-radius:12px;font-weight:700;font-size:14px;color:#fff;box-shadow:var(--shadow-lg);opacity:0;transform:translateY(10px);transition:opacity .2s,transform .2s;pointer-events:none;z-index:1000;max-width:320px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.ok{background:var(--ok)}
+.toast.err{background:var(--err)}
 
 /* Detail head */
 .back{background:none;border:0;color:var(--violet);font-size:14px;font-weight:700;cursor:pointer;padding:0;margin-bottom:18px;font-family:var(--font-body)}
@@ -195,8 +205,13 @@ var TENANTS = [];
   } catch(e) {}
 })();
 
-async function api(method, path) {
-  var r = await fetch(API + path, { method: method, headers: { "x-app-secret": SECRET } });
+async function api(method, path, body) {
+  var opts = { method: method, headers: { "x-app-secret": SECRET } };
+  if (body != null) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  var r = await fetch(API + path, opts);
   var data = await r.json().catch(function() { return {}; });
   return { ok: r.ok, status: r.status, data: data };
 }
@@ -250,7 +265,11 @@ function renderTenants(tenants) {
   }).join("");
 }
 
-function showList() { $("listView").style.display="block"; $("detailView").style.display="none"; calRef=null; }
+// Current detail-view tenant (for inline edits like the Int. links toggle)
+var currentTenantId = null;
+var currentProfile = null;
+
+function showList() { $("listView").style.display="block"; $("detailView").style.display="none"; calRef=null; currentTenantId=null; currentProfile=null; }
 
 async function openTenant(encId) {
   var id = decodeURIComponent(encId);
@@ -271,6 +290,10 @@ async function openTenant(encId) {
 }
 
 function renderDetail(id, profile, q) {
+  // Stash for inline edits (Int. links toggle) — full profile round-trip on save
+  currentTenantId = id;
+  currentProfile = profile || {};
+
   var queue = q.queue || [];
   var history = q.history || [];
   var plan = q.plan;
@@ -303,7 +326,7 @@ function renderDetail(id, profile, q) {
     '<div class="stat"><div class="n">' + history.length + '</div><div class="l">Published</div></div>' +
     '<div class="stat"><div class="n" style="font-size:' + (nextUpDisplay.length <= 5 ? '30' : '19') + 'px;padding-top:' + (nextUpDisplay.length <= 5 ? '0' : '8') + 'px">' + escapeHtml(nextUpDisplay) + '</div><div class="l">' + escapeHtml(nextUpLabel) + '</div></div>' +
     '<div class="stat"><div class="n">' + escapeHtml((profile.primaryLanguage||'\u2014').toUpperCase()) + '</div><div class="l">Language</div></div>' +
-    '<div class="stat"><div class="n" style="font-size:22px;padding-top:5px">' + linking + '</div><div class="l">Int. links</div></div>' +
+    '<div class="stat clickable" id="intLinksStat" onclick="toggleIntLinks()" title="Click to toggle internal linking"><div class="n" id="intLinksVal" style="font-size:22px;padding-top:5px">' + linking + '</div><div class="l">Int. links</div><div class="hint">click to toggle</div></div>' +
     '</div>';
 
   if (plan) {
@@ -419,6 +442,60 @@ function calMove(delta) {
   var pubDates = new Set();
   (calHistory||[]).forEach(function(h) { var d=(h.published_at||"").slice(0,10); if(d) pubDates.add(d); });
   drawCalendar(mount._byDate || {}, pubDates);
+}
+
+/* ─── Int. links toggle ─── */
+async function toggleIntLinks() {
+  if (!currentTenantId || !currentProfile) return;
+  var stat = $("intLinksStat");
+  var valEl = $("intLinksVal");
+  if (!stat || !valEl) return;
+  if (stat.dataset.busy === "1") return;
+
+  var currentEnabled = !!(currentProfile.authority && currentProfile.authority.enabled);
+  var newEnabled = !currentEnabled;
+
+  // Optimistic UI
+  stat.dataset.busy = "1";
+  valEl.textContent = newEnabled ? "On" : "Off";
+
+  // Full-profile save — clone, flip authority.enabled, POST update
+  var newProfile;
+  try { newProfile = JSON.parse(JSON.stringify(currentProfile)); }
+  catch(e) { newProfile = Object.assign({}, currentProfile); }
+  if (!newProfile.authority || typeof newProfile.authority !== "object") newProfile.authority = {};
+  newProfile.authority.enabled = newEnabled;
+
+  var r = await api("POST", "/tenants", { action: "update", id: currentTenantId, profile: newProfile });
+  stat.dataset.busy = "";
+
+  if (r.ok && r.data && r.data.ok) {
+    // Update only the flag on our working copy — server returns publicProfile (filtered),
+    // so overwriting currentProfile wholesale could drop non-public fields on next toggle.
+    if (!currentProfile.authority || typeof currentProfile.authority !== "object") currentProfile.authority = {};
+    currentProfile.authority.enabled = newEnabled;
+    valEl.textContent = newEnabled ? "On" : "Off";
+    showToast("Internal links " + (newEnabled ? "on" : "off"), "ok");
+  } else {
+    // Revert on failure
+    valEl.textContent = currentEnabled ? "On" : "Off";
+    showToast((r.data && r.data.error) || "Save failed", "err");
+  }
+}
+
+/* ─── Toast ─── */
+function showToast(text, kind) {
+  var t = $("toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "toast";
+    t.className = "toast";
+    document.body.appendChild(t);
+  }
+  t.textContent = text;
+  t.className = "toast show " + (kind === "err" ? "err" : "ok");
+  clearTimeout(t._hideTimer);
+  t._hideTimer = setTimeout(function() { t.className = "toast " + (kind === "err" ? "err" : "ok"); }, 2400);
 }
 
 function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
