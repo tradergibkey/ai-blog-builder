@@ -117,6 +117,8 @@ export default async function handler(req, res) {
             tenant: t.id,
             createdAtISO: t.createdAt || "2020-01-01",
             queueTarget: profile.queueTarget || 2,
+            publishDays: profile.publishDays,
+            timezone: profile.timezone,
             kvGet,
           });
           if (!velCheck.allowed) {
@@ -155,6 +157,8 @@ export default async function handler(req, res) {
             tenant: t.id,
             createdAtISO: t.createdAt || "2020-01-01",
             queueTarget: profile.queueTarget || 2,
+            publishDays: profile.publishDays,
+            timezone: profile.timezone,
             kvGet,
           });
           if (!velCheck.allowed) {
