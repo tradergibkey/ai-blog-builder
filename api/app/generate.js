@@ -146,33 +146,76 @@ ${outlineDirective}
 
 Write the complete article in ${langName}. Make it practical, engaging, and SEO-optimized.`;
 
-    // ---- 3) Call Claude ----
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 4000,
-        system,
-        messages: [{ role: "user", content: userMsg }],
-        tools: [tool],
-        tool_choice: { type: "tool", name: "write_article" },
-      }),
-    });
+    // ---- 3) Call Claude (hardened) ----
+    // Vercel function budget is 120s (see config.maxDuration above). We reserve
+    // ~15s for post-processing (KV archetype write, response serialization) and
+    // give Claude up to 105s. Beyond that we abort cleanly instead of getting
+    // killed by Vercel's function-level timeout — which produces a much uglier
+    // 504 with no clean error path for cron to retry.
+    const CLAUDE_TIMEOUT_MS = 105_000;
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), CLAUDE_TIMEOUT_MS);
+    const t0 = Date.now();
+
+    let claudeRes;
+    try {
+      claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          // max_tokens was 4000 — too tight for a full Hungarian HTML article
+          // + FAQ + image queries + tool JSON overhead. When Claude hit the cap
+          // it returned stop_reason:"max_tokens" with a partially-serialized
+          // tool_use.input where `body` was truncated/empty, surfacing
+          // downstream as "Article missing title or body." Bumped to 8000.
+          max_tokens: 8000,
+          system,
+          messages: [{ role: "user", content: userMsg }],
+          tools: [tool],
+          tool_choice: { type: "tool", name: "write_article" },
+        }),
+        signal: ctrl.signal,
+      });
+    } catch (fetchErr) {
+      if (fetchErr.name === "AbortError") {
+        throw new Error(`Claude API timed out after ${CLAUDE_TIMEOUT_MS / 1000}s`);
+      }
+      throw new Error(`Claude fetch failed: ${fetchErr.message}`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    const dtMs = Date.now() - t0;
 
     if (!claudeRes.ok) {
-      throw new Error(`Claude API ${claudeRes.status}: ${(await claudeRes.text()).slice(0, 300)}`);
+      throw new Error(`Claude API ${claudeRes.status} after ${dtMs}ms: ${(await claudeRes.text()).slice(0, 300)}`);
     }
 
     const claudeData = await claudeRes.json();
+
+    // Detect max_tokens truncation explicitly — this WAS the silent failure
+    // that produced the confusing downstream "Article missing title or body."
+    if (claudeData.stop_reason === "max_tokens") {
+      throw new Error(`Claude output truncated at max_tokens after ${dtMs}ms. Article incomplete — raise max_tokens or reduce prompt complexity.`);
+    }
+
     const block = (claudeData.content || []).find(b => b.type === "tool_use");
-    if (!block || !block.input) throw new Error("Claude returned no article.");
+    if (!block || !block.input) throw new Error(`Claude returned no tool_use block after ${dtMs}ms. stop_reason=${claudeData.stop_reason}`);
 
     const article = block.input;
+
+    // Validate here — fail with a clear error instead of returning ok:true with
+    // a broken article that publish.js then rejects with a misleading 400.
+    if (!article.title || !article.body) {
+      throw new Error(`Claude returned incomplete article (title=${!!article.title}, body=${!!article.body}) after ${dtMs}ms. stop_reason=${claudeData.stop_reason}`);
+    }
+
+    console.log(`[generate] ${id}: ok in ${dtMs}ms, ${article.body.length} body chars, stop_reason=${claudeData.stop_reason}, archetype=${archetypeKey}`);
+
     article.language = lang;
     article.category = category;
     article.topic = topic;
