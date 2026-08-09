@@ -64,6 +64,10 @@ export function blankProfile() {
     timezone:      "Europe/Madrid",
     publishWindow: { startHour: 6, endHour: 18 },
     cadence:       1,           // posts per day
+    // Days of week ABB is allowed to publish on (tenant timezone).
+    // Default = all 7 = every day. Empty/missing = treated as all 7
+    // (safety net in publish-policy so an accidental unselect can't halt autopilot).
+    publishDays:   ["mon","tue","wed","thu","fri","sat","sun"],
 
     // ⑤ Social (Phase 4, optional) --------------------------------------
     social: { enabled: false, channels: [] }, // generalizes today's 2 Make webhooks
@@ -96,6 +100,7 @@ export function normalizeProfile(partial = {}) {
   p.competitors = Array.isArray(partial.competitors) ? partial.competitors : base.competitors;
   p.categories  = Array.isArray(partial.categories)  ? partial.categories  : base.categories;
   p.keywords    = Array.isArray(partial.keywords)    ? partial.keywords    : base.keywords;
+  p.publishDays = Array.isArray(partial.publishDays) ? partial.publishDays : base.publishDays;
 
   p.createdAt = partial.createdAt || base.createdAt;
   p.updatedAt = new Date().toISOString();
