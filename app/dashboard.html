@@ -301,6 +301,17 @@ function renderDetail(id, profile, q) {
   var intBadge = intType==="github-static" ? '<span class="badge gh">GitHub</span>' : '<span class="badge wp">WordPress</span>';
   var linking = (profile.authority && profile.authority.enabled) ? "On" : "Off";
 
+  // Publish days summary: "Daily" for all 7, otherwise single-letter list like "M W F"
+  var pubDays = Array.isArray(profile.publishDays) ? profile.publishDays : null;
+  var dayLetters = { mon:"M", tue:"T", wed:"W", thu:"T", fri:"F", sat:"S", sun:"S" };
+  var pubDaysDisplay;
+  if (!pubDays || !pubDays.length || pubDays.length === 7) {
+    pubDaysDisplay = "Daily";
+  } else {
+    var order = ["mon","tue","wed","thu","fri","sat","sun"];
+    pubDaysDisplay = order.filter(function(d) { return pubDays.indexOf(d) !== -1; }).map(function(d) { return dayLetters[d]; }).join(" ");
+  }
+
   // ── "Next Up" stat: show plan target time if pending, otherwise next queue date ──
   var nextUpDisplay = "\u2014";
   var nextUpLabel = "Next up";
@@ -327,6 +338,7 @@ function renderDetail(id, profile, q) {
     '<div class="stat"><div class="n" style="font-size:' + (nextUpDisplay.length <= 5 ? '30' : '19') + 'px;padding-top:' + (nextUpDisplay.length <= 5 ? '0' : '8') + 'px">' + escapeHtml(nextUpDisplay) + '</div><div class="l">' + escapeHtml(nextUpLabel) + '</div></div>' +
     '<div class="stat"><div class="n">' + escapeHtml((profile.primaryLanguage||'\u2014').toUpperCase()) + '</div><div class="l">Language</div></div>' +
     '<div class="stat clickable" id="intLinksStat" onclick="toggleIntLinks()" title="Click to toggle internal linking"><div class="n" id="intLinksVal" style="font-size:22px;padding-top:5px">' + linking + '</div><div class="l">Int. links</div><div class="hint">click to toggle</div></div>' +
+    '<div class="stat"><div class="n" style="font-size:' + (pubDaysDisplay.length <= 5 ? '22' : '16') + 'px;padding-top:' + (pubDaysDisplay.length <= 5 ? '5' : '10') + 'px">' + escapeHtml(pubDaysDisplay) + '</div><div class="l">Publish days</div></div>' +
     '</div>';
 
   if (plan) {
