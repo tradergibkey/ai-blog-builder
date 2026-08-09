@@ -101,6 +101,13 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .toast.ok{background:var(--ok)}
 .toast.err{background:var(--err)}
 
+/* Day-of-week mini pills (Publish days stat card) */
+.day-mini-pills{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;padding:6px 0 2px}
+.day-mini{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:var(--bg-alt);color:var(--muted);font-family:var(--font-mono);font-size:11px;font-weight:700;cursor:pointer;user-select:none;transition:background .12s,color .12s,transform .1s}
+.day-mini:hover{transform:scale(1.08)}
+.day-mini.selected{background:var(--violet);color:#fff}
+.stat[data-busy="1"] .day-mini{pointer-events:none}
+
 /* Detail head */
 .back{background:none;border:0;color:var(--violet);font-size:14px;font-weight:700;cursor:pointer;padding:0;margin-bottom:18px;font-family:var(--font-body)}
 .detail-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:22px}
@@ -301,16 +308,15 @@ function renderDetail(id, profile, q) {
   var intBadge = intType==="github-static" ? '<span class="badge gh">GitHub</span>' : '<span class="badge wp">WordPress</span>';
   var linking = (profile.authority && profile.authority.enabled) ? "On" : "Off";
 
-  // Publish days summary: "Daily" for all 7, otherwise single-letter list like "M W F"
-  var pubDays = Array.isArray(profile.publishDays) ? profile.publishDays : null;
+  // Publish days pills — 7 clickable letter pills. Missing/empty publishDays = all 7 (backward compat).
+  var DAY_ORDER = ["mon","tue","wed","thu","fri","sat","sun"];
   var dayLetters = { mon:"M", tue:"T", wed:"W", thu:"T", fri:"F", sat:"S", sun:"S" };
-  var pubDaysDisplay;
-  if (!pubDays || !pubDays.length || pubDays.length === 7) {
-    pubDaysDisplay = "Daily";
-  } else {
-    var order = ["mon","tue","wed","thu","fri","sat","sun"];
-    pubDaysDisplay = order.filter(function(d) { return pubDays.indexOf(d) !== -1; }).map(function(d) { return dayLetters[d]; }).join(" ");
-  }
+  var pubDays = Array.isArray(profile.publishDays) && profile.publishDays.length ? profile.publishDays : DAY_ORDER;
+  var pubDaysPills = DAY_ORDER.map(function(d, i) {
+    var sel = pubDays.indexOf(d) !== -1;
+    // event.stopPropagation prevents the outer .stat wrapper from swallowing the click if it ever gets one
+    return '<span class="day-mini' + (sel ? ' selected' : '') + '" data-day="' + d + '" onclick="event.stopPropagation();toggleDayPill(\'' + d + '\')" title="' + ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][i] + '">' + dayLetters[d] + '</span>';
+  }).join("");
 
   // ── "Next Up" stat: show plan target time if pending, otherwise next queue date ──
   var nextUpDisplay = "\u2014";
@@ -338,7 +344,7 @@ function renderDetail(id, profile, q) {
     '<div class="stat"><div class="n" style="font-size:' + (nextUpDisplay.length <= 5 ? '30' : '19') + 'px;padding-top:' + (nextUpDisplay.length <= 5 ? '0' : '8') + 'px">' + escapeHtml(nextUpDisplay) + '</div><div class="l">' + escapeHtml(nextUpLabel) + '</div></div>' +
     '<div class="stat"><div class="n">' + escapeHtml((profile.primaryLanguage||'\u2014').toUpperCase()) + '</div><div class="l">Language</div></div>' +
     '<div class="stat clickable" id="intLinksStat" onclick="toggleIntLinks()" title="Click to toggle internal linking"><div class="n" id="intLinksVal" style="font-size:22px;padding-top:5px">' + linking + '</div><div class="l">Int. links</div><div class="hint">click to toggle</div></div>' +
-    '<div class="stat"><div class="n" style="font-size:' + (pubDaysDisplay.length <= 5 ? '22' : '16') + 'px;padding-top:' + (pubDaysDisplay.length <= 5 ? '5' : '10') + 'px">' + escapeHtml(pubDaysDisplay) + '</div><div class="l">Publish days</div></div>' +
+    '<div class="stat" id="daysStat"><div class="day-mini-pills" id="daysPills">' + pubDaysPills + '</div><div class="l">Publish days</div><div class="hint">click letters to toggle</div></div>' +
     '</div>';
 
   if (plan) {
@@ -508,6 +514,80 @@ function showToast(text, kind) {
   t.className = "toast show " + (kind === "err" ? "err" : "ok");
   clearTimeout(t._hideTimer);
   t._hideTimer = setTimeout(function() { t.className = "toast " + (kind === "err" ? "err" : "ok"); }, 2400);
+}
+
+/* ─── Publish days pill toggle ─── */
+var _daysSaveTimer = null;
+var DAY_ORDER_JS = ["mon","tue","wed","thu","fri","sat","sun"];
+
+function toggleDayPill(d) {
+  var el = document.querySelector('.day-mini[data-day="' + d + '"]');
+  if (!el) return;
+  el.classList.toggle("selected");
+  // Debounce so tapping 3 pills in a row = 1 network call, not 3
+  clearTimeout(_daysSaveTimer);
+  _daysSaveTimer = setTimeout(saveDays, 800);
+}
+
+function currentSelectedDays() {
+  var picked = [];
+  document.querySelectorAll('.day-mini.selected').forEach(function(el) {
+    picked.push(el.dataset.day);
+  });
+  // Preserve canonical order regardless of DOM order
+  return DAY_ORDER_JS.filter(function(d) { return picked.indexOf(d) !== -1; });
+}
+
+function paintDayPills(days) {
+  document.querySelectorAll('.day-mini').forEach(function(el) {
+    el.classList.toggle("selected", days.indexOf(el.dataset.day) !== -1);
+  });
+}
+
+async function saveDays() {
+  if (!currentTenantId || !currentProfile) return;
+  var stat = $("daysStat");
+  if (!stat) return;
+
+  var newDays = currentSelectedDays();
+
+  // Previously-saved state (for revert on failure).
+  // Missing/empty publishDays in profile = all 7 (backward-compat display).
+  var prevDays = (Array.isArray(currentProfile.publishDays) && currentProfile.publishDays.length)
+    ? currentProfile.publishDays.slice()
+    : DAY_ORDER_JS.slice();
+
+  // Zero-days guard — never let the user "save nothing" (autopilot would halt).
+  if (newDays.length === 0) {
+    showToast("Pick at least 1 day", "err");
+    paintDayPills(prevDays);
+    return;
+  }
+
+  // No-op guard — nothing to save if selection matches what's stored
+  if (newDays.length === prevDays.length && newDays.every(function(d, i) { return d === prevDays[i]; })) {
+    return;
+  }
+
+  stat.dataset.busy = "1";
+
+  var newProfile;
+  try { newProfile = JSON.parse(JSON.stringify(currentProfile)); }
+  catch(e) { newProfile = Object.assign({}, currentProfile); }
+  newProfile.publishDays = newDays;
+
+  var r = await api("POST", "/tenants", { action: "update", id: currentTenantId, profile: newProfile });
+  stat.dataset.busy = "";
+
+  if (r.ok && r.data && r.data.ok) {
+    // Update only the field on the working copy — server returns publicProfile (filtered),
+    // overwriting could drop non-public fields on next inline edit.
+    currentProfile.publishDays = newDays.slice();
+    showToast("Publish days saved", "ok");
+  } else {
+    paintDayPills(prevDays);
+    showToast((r.data && r.data.error) || "Save failed", "err");
+  }
 }
 
 function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
