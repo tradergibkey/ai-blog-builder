@@ -9,9 +9,10 @@
 //  Per active tenant (WordPress or github-static), each ping:
 //    0. Refills the content queue to queueTarget (via /api/app/topics)
 //    1. If no plan for today and we're inside the tenant's publish window
-//       (in THEIR timezone): pick the next due topic, roll a random HH:MM
-//       between now and window end, store as today's plan. Publish nothing.
-//    2. If today's plan is pending and the rolled time has passed: publish
+//       (in THEIR timezone): pick the next due topic, use its pre-rolled
+//       scheduledTime as today's target if available (falls back to a fresh
+//       roll for legacy queue items), store as today's plan. Publish nothing.
+//    2. If today's plan is pending and the target time has passed: publish
 //       via /api/app/publish, remove the topic from the queue, mark done.
 //    3. Otherwise: idle.
 //
@@ -131,13 +132,17 @@ export default async function handler(req, res) {
             await savePlan(t.id, { date: now.date, status: "empty" });
             r.action = "no-topic"; results.push(r); continue;
           }
-          const rolled = rollTarget(now.min, winStart, winEnd);
-          plan = { date: now.date, target: rolled, queueId: pick.id, topic: pick.topic, category: pick.category || "", status: "pending" };
+          // Use pre-rolled scheduledTime when the queue item has one; else roll
+          // today (backward compat for legacy queues generated before pre-roll).
+          const planTarget = (typeof pick.scheduledTime === "string" && /^\d\d:\d\d$/.test(pick.scheduledTime))
+            ? pick.scheduledTime
+            : rollTargetNow(now.min, winStart, winEnd);
+          plan = { date: now.date, target: planTarget, queueId: pick.id, topic: pick.topic, category: pick.category || "", status: "pending" };
           await savePlan(t.id, plan);
-          r.action = "planned"; r.target = rolled; r.topic = pick.topic; results.push(r); continue;
+          r.action = "planned"; r.target = planTarget; r.topic = pick.topic; results.push(r); continue;
         }
 
-        // ---- 2) Publish when the rolled time arrives ----
+        // ---- 2) Publish when the target time arrives ----
         if ((plan.status === "pending" || plan.status === "publishing") && now.hhmm >= plan.target) {
           if (publishedThisRun) { r.action = "deferred"; r.reason = "another tenant published this run"; results.push(r); continue; }
 
@@ -225,8 +230,9 @@ function nextDue(queue, today) {
   return queue.find(e => e.date && e.date <= today) || queue.find(e => !e.date) || null;
 }
 
-// random HH:MM between now and window end (never before window start)
-function rollTarget(nowMin, winStart, winEnd) {
+// Fallback roll (legacy queue items with no scheduledTime): random HH:MM
+// between now and window end (never before window start).
+function rollTargetNow(nowMin, winStart, winEnd) {
   const start = Math.max(winStart, nowMin);
   const t = start + Math.floor(Math.random() * (Math.max(winEnd - start, 0) + 1));
   return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
