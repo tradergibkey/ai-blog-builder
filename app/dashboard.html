@@ -377,6 +377,7 @@ function renderDetail(id, profile, q) {
 var calRef = null;
 var calHistory = [];
 var calPlan = null;
+var calTodayStr = null; // "YYYY-MM-DD" — set at draw time so we can tell future from today
 
 function renderCalendar(queue, history, plan) {
   var byDate = {};
@@ -404,6 +405,7 @@ function drawCalendar(byDate, pubDates) {
   var startDow = (first.getUTCDay() + 6) % 7;
   var daysInMonth = new Date(Date.UTC(y, m+1, 0)).getUTCDate();
   var todayStr = new Date().toISOString().slice(0,10);
+  calTodayStr = todayStr;
 
   var html = '<div class="cal-nav">' +
     '<button onclick="calMove(-1)">\u2190</button>' +
@@ -430,6 +432,11 @@ function drawCalendar(byDate, pubDates) {
       var pubTime = getPubTime(ds);
       cellContent += '<div class="plan-time" style="color:var(--ok)">\u2713 ' + (pubTime || 'Published') + '</div>';
     } else if (items.length) {
+      // Future queued item — show its pre-rolled scheduledTime if present
+      var st = items[0].scheduledTime;
+      if (typeof st === "string" && /^\d\d:\d\d$/.test(st)) {
+        cellContent += '<div class="plan-time">\u23F3 ' + escapeHtml(st) + '</div>';
+      }
       cellContent += '<div class="topic">' + escapeHtml(items[0].topic||"") + '</div>';
     }
 
@@ -438,6 +445,7 @@ function drawCalendar(byDate, pubDates) {
   html += '</div>';
   mount.innerHTML = html;
   mount._byDate = byDate;
+  mount._pubDates = pubDates;
 }
 
 // Look up the publish time (HH:MM in browser local tz) for a given date
@@ -577,16 +585,30 @@ async function saveDays() {
   newProfile.publishDays = newDays;
 
   var r = await api("POST", "/tenants", { action: "update", id: currentTenantId, profile: newProfile });
-  stat.dataset.busy = "";
 
-  if (r.ok && r.data && r.data.ok) {
-    // Update only the field on the working copy — server returns publicProfile (filtered),
-    // overwriting could drop non-public fields on next inline edit.
-    currentProfile.publishDays = newDays.slice();
-    showToast("Publish days saved", "ok");
-  } else {
+  if (!(r.ok && r.data && r.data.ok)) {
+    stat.dataset.busy = "";
     paintDayPills(prevDays);
     showToast((r.data && r.data.error) || "Save failed", "err");
+    return;
+  }
+
+  // Profile save succeeded — update working copy
+  currentProfile.publishDays = newDays.slice();
+
+  // Now automatically re-date the queue against the new schedule.
+  // A profile-save success + redate failure is worth surfacing but shouldn't
+  // revert the profile — the operator's intent to change days is real.
+  var rd = await api("POST", "/queue", { action: "redate", id: currentTenantId });
+  stat.dataset.busy = "";
+
+  if (rd.ok && rd.data && rd.data.ok) {
+    showToast("Publish days saved \u00B7 " + (rd.data.redated || 0) + " items re-dated", "ok");
+    // Refresh calendar with the newly-dated queue (no full-page reload).
+    // rd.data.queue is the updated queue; re-use current history + plan.
+    renderCalendar(rd.data.queue || [], calHistory, calPlan);
+  } else {
+    showToast("Days saved, but re-date failed: " + ((rd.data && rd.data.error) || "unknown"), "err");
   }
 }
 
