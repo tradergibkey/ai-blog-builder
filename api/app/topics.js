@@ -3,11 +3,15 @@
 // -----------------------------------------------------------------------------
 //  Tenant-aware topic generation. Reads the tenant profile (niche, audience,
 //  categories, competitors, language) and fills their content queue with
-//  dated topics — one per day, in the tenant's own timezone.
+//  dated topics — one per publish day, in the tenant's own timezone.
 //
 //  POST /api/app/topics  { id }                    → fill queue to queueTarget
 //  POST /api/app/topics  { id, count: 5 }          → generate exactly 5
 //  POST /api/app/topics  { id, preview: true }     → return without saving
+//
+//  Each queued item carries:
+//    date          — YYYY-MM-DD (only on tenant's publishDays, tenant tz)
+//    scheduledTime — "HH:MM" rolled uniformly within publishWindow (tenant tz)
 //
 //  AUTH: x-app-secret (operator only)
 //  ENV:  ABB_APP_SECRET, ANTHROPIC_API_KEY
@@ -15,6 +19,7 @@
 
 import { getProfile } from "./_profile.js";
 import { getQueue, saveQueue, getHistory } from "./_store.js";
+import { nextPublishDay, addDaysYmd } from "../../lib/publish-policy.js";
 
 export const config = { maxDuration: 120 };
 
@@ -143,7 +148,7 @@ Call the suggest_topics tool with your ideas.`;
       return res.status(200).json({ ok: true, added: false, count: topics.length, topics });
     }
 
-    // ---- Assign dates (one per day, tenant timezone, next free days) ----
+    // ---- Assign dates (only on publishDays, tenant tz) + roll scheduledTime ----
     // Re-read the queue NOW to guard against overlapping refill runs
     const freshQueue = await getQueue(id);
     const room = Math.max(0, target - freshQueue.length);
@@ -153,17 +158,31 @@ Call the suggest_topics tool with your ideas.`;
       return res.status(200).json({ ok: true, added: false, count: 0, reason: "Queue filled by another run." });
     }
 
+    const tz = profile.timezone || "Europe/Madrid";
+    const publishDays = profile.publishDays;
+    const winStart = (profile.publishWindow?.startHour ?? 6) * 60;
+    const winEnd   = (profile.publishWindow?.endHour ?? 18) * 60;
+
     const taken = new Set([
       ...freshQueue.filter(q => q.date).map(q => q.date),
       ...hist.filter(h => h.published_at).map(h => h.published_at.slice(0, 10)),
     ]);
 
-    let cursor = addDays(tzToday(profile.timezone), 1); // start tomorrow
+    // Start looking from TODAY (tenant tz), advancing to the next publish day.
+    // Starting from tomorrow would skip today's slot entirely — with a sparse
+    // schedule (e.g. Tue/Thu/Sat) that costs 2-3 days for no reason. The `taken`
+    // set below already prevents collision if today is spoken for (an existing
+    // queue item or an entry in history), and cron's nextDue picks
+    // `date <= today`, so a same-day item is publishable on this very day.
+    let cursor = nextPublishDay(tzToday(tz), publishDays, tz);
     const nextFreeDay = () => {
-      while (taken.has(cursor)) cursor = addDays(cursor, 1);
+      // Walk forward one publish day at a time until we find a date not already taken
+      while (taken.has(cursor)) {
+        cursor = nextPublishDay(addDaysYmd(cursor, 1), publishDays, tz);
+      }
       const d = cursor;
       taken.add(d);
-      cursor = addDays(cursor, 1);
+      cursor = nextPublishDay(addDaysYmd(cursor, 1), publishDays, tz);
       return d;
     };
 
@@ -174,6 +193,7 @@ Call the suggest_topics tool with your ideas.`;
         topic: t.topic,
         category: t.category || "",
         date: nextFreeDay(),
+        scheduledTime: rollTime(winStart, winEnd),
         status: "queued",
         created: new Date().toISOString(),
       });
@@ -200,6 +220,15 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+// Random "HH:MM" uniformly within [winStart, winEnd] minutes-from-midnight.
+// Guards against a swapped/equal window (returns winStart).
+function rollTime(winStart, winEnd) {
+  const lo = Math.max(0, Math.min(winStart, winEnd));
+  const hi = Math.max(0, Math.max(winStart, winEnd));
+  const t = lo + Math.floor(Math.random() * (Math.max(hi - lo, 0) + 1));
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+}
+
 // Today's date "YYYY-MM-DD" in the tenant's timezone
 function tzToday(tz) {
   try {
@@ -211,12 +240,6 @@ function tzToday(tz) {
   } catch {
     return new Date().toISOString().slice(0, 10);
   }
-}
-
-// "YYYY-MM-DD" + n days → "YYYY-MM-DD" (UTC-safe arithmetic)
-function addDays(ymd, n) {
-  const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
 const LANG_NAMES = {
