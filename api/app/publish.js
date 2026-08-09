@@ -401,10 +401,16 @@ async function publishToGitHub(req, res, id, profile, body) {
     postHtml = injectTracking(postHtml, gtagId, profile.primaryLanguage || "en");
   }
 
-  // ---- 4c) E-E-A-T: Article + Author schema (JSON-LD in <head>) ----
-  if (profile.author?.name) {
-    postHtml = injectAuthorSchema(postHtml, profile.author, article.title, dateIso, heroImg);
-  }
+  // ---- 4c) E-E-A-T Article+Author schema injection has been REMOVED.
+  //          Emlektabla's template already emits its own BlogPosting JSON-LD
+  //          for the article, and Google prefers one schema block per page.
+  //          The visible byline (see prependByline above) still carries the
+  //          author signal; FAQPage JSON-LD is still added by appendFaq.
+  //          If a future tenant has NO built-in Article schema in its template,
+  //          re-enable by uncommenting:
+  //   if (profile.author?.name) {
+  //     postHtml = injectAuthorSchema(postHtml, profile.author, article.title, dateIso, heroImg);
+  //   }
 
   // ---- 5) Commit the post file ----
   const postPath = `blog/posts/${slug}.html`;
