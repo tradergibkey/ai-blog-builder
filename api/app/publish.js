@@ -364,16 +364,16 @@ async function publishToGitHub(req, res, id, profile, body) {
     articleBody = appendFaq(articleBody, article.faq);
   }
 
-  // E-E-A-T: byline block (prepended to top of article content)
-  if (profile.author?.name) {
-    articleBody = prependByline(articleBody, profile.author, dateDisplay);
-  }
-
-  // ---- 3) Build slug + dates ----
+  // ---- 3) Build slug + dates (must come before byline injection — byline uses dateDisplay) ----
   const slug = slugify(article.title);
   const now  = new Date();
   const dateIso     = now.toISOString();
   const dateDisplay = formatDateHu(now, profile.primaryLanguage || "hu");
+
+  // E-E-A-T: byline block (prepended to top of article content)
+  if (profile.author?.name) {
+    articleBody = prependByline(articleBody, profile.author, dateDisplay);
+  }
 
   // ---- 4) Read the post template from the repo ----
   const templatePath = "blog/post-template.html";
