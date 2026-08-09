@@ -147,6 +147,15 @@ code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
 .cadence-opt .lock-tag{font-size:10px;font-weight:700;color:var(--warn);background:var(--warn-bg);padding:2px 6px;border-radius:4px;text-transform:uppercase}
 .cadence-opt input[type=radio]{margin:0}
 
+/* Day-of-week picker (Step 4) */
+.day-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.day-pill{display:inline-flex;align-items:center;justify-content:center;min-width:52px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;color:var(--ink-2);background:#fff;user-select:none;transition:border-color .12s,background .12s,color .12s}
+.day-pill:hover{border-color:var(--blue)}
+.day-pill.selected{border-color:var(--blue);background:var(--blue-l);color:var(--blue)}
+.day-pill-actions{display:flex;gap:8px;margin-top:8px;font-size:12px}
+.day-pill-actions button{background:none;border:none;color:var(--blue);font-weight:600;cursor:pointer;padding:0;font-family:inherit}
+.day-pill-actions button:hover{text-decoration:underline}
+
 /* Validation error box */
 .step-errors{display:none;padding:12px 14px;border-radius:10px;background:var(--err-bg);border:1px solid #fca5a5;margin-bottom:16px;font-size:14px;color:var(--err)}
 .step-errors.show{display:block}
@@ -454,6 +463,25 @@ code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
     <div class="range-group"><span style="font-size:13px;font-weight:600;min-width:46px">Until</span>
       <input type="range" id="windowEnd" min="0" max="23" value="18" oninput="updateWindowLabel()">
       <span class="range-val" id="windowEndVal">18:00</span></div>
+  </div>
+
+  <div style="margin-bottom:18px">
+    <span class="lbl" style="display:block;margin-bottom:6px">Publish days</span>
+    <span class="hint" style="display:block;font-size:12px;color:var(--faint);margin-bottom:10px">Which days of the week ABB is allowed to publish. Skipped days move to the next allowed day.</span>
+    <div class="day-pills" id="dayPills">
+      <div class="day-pill selected" data-day="mon" onclick="toggleDay('mon')">Mon</div>
+      <div class="day-pill selected" data-day="tue" onclick="toggleDay('tue')">Tue</div>
+      <div class="day-pill selected" data-day="wed" onclick="toggleDay('wed')">Wed</div>
+      <div class="day-pill selected" data-day="thu" onclick="toggleDay('thu')">Thu</div>
+      <div class="day-pill selected" data-day="fri" onclick="toggleDay('fri')">Fri</div>
+      <div class="day-pill selected" data-day="sat" onclick="toggleDay('sat')">Sat</div>
+      <div class="day-pill selected" data-day="sun" onclick="toggleDay('sun')">Sun</div>
+    </div>
+    <div class="day-pill-actions">
+      <button type="button" onclick="setDays('all')">All 7</button>
+      <button type="button" onclick="setDays('weekdays')">Weekdays only</button>
+      <button type="button" onclick="setDays('mwf')">Mon / Wed / Fri</button>
+    </div>
   </div>
 
   <div style="margin-bottom:18px">
@@ -781,6 +809,8 @@ function validateStep(step) {
   if(step===4){
     const s=+$("windowStart").value, e=+$("windowEnd").value;
     if(e<=s) errs.push("Publish window end must be after start.");
+    // At least one publish day must be selected
+    if(getPublishDays().length===0) errs.push("Pick at least one publish day.");
     // Gtag validation: invalid format blocks, empty just warns
     var gtagResult = validateGtag(true);
     if (gtagResult === "err") {
@@ -919,6 +949,35 @@ function populateTimezones(){
 }
 function updateWindowLabel(){ $("windowStartVal").textContent=$("windowStart").value+":00"; $("windowEndVal").textContent=$("windowEnd").value+":00"; }
 
+/* ═══ PUBLISH DAYS ═══ */
+const DAY_ORDER = ["mon","tue","wed","thu","fri","sat","sun"];
+function toggleDay(d){
+  const el=document.querySelector(`.day-pill[data-day="${d}"]`);
+  if(!el) return;
+  el.classList.toggle("selected");
+}
+function setDays(preset){
+  let picked;
+  if(preset==="all") picked=DAY_ORDER.slice();
+  else if(preset==="weekdays") picked=["mon","tue","wed","thu","fri"];
+  else if(preset==="mwf") picked=["mon","wed","fri"];
+  else picked=DAY_ORDER.slice();
+  document.querySelectorAll(".day-pill").forEach(el=>{
+    el.classList.toggle("selected", picked.indexOf(el.dataset.day)!==-1);
+  });
+}
+function getPublishDays(){
+  const picked=[];
+  document.querySelectorAll(".day-pill.selected").forEach(el=>picked.push(el.dataset.day));
+  // Preserve canonical order regardless of DOM order
+  return DAY_ORDER.filter(d=>picked.indexOf(d)!==-1);
+}
+function formatPublishDays(days){
+  if(!days||!days.length||days.length===7) return "Every day";
+  const labels={mon:"Mon",tue:"Tue",wed:"Wed",thu:"Thu",fri:"Fri",sat:"Sat",sun:"Sun"};
+  return days.map(d=>labels[d]||d).join(", ");
+}
+
 /* ═══ CADENCE ═══ */
 function setCadence(v){
   cadence=v;
@@ -966,6 +1025,7 @@ function renderReview(){
     ["Queue size",$("queueTarget").value+" articles"],
     ["Timezone",esc($("timezone").value)],
     ["Publish window",$("windowStart").value+":00 \u2013 "+$("windowEnd").value+":00"],
+    ["Publish days",esc(formatPublishDays(getPublishDays()))],
     ["Publishing",autoLabel],
     ["Internal linking",$("authorityToggle").checked?"Enabled":"Off"],
     ["Tracking",trackingLabel],
@@ -1017,6 +1077,7 @@ async function saveProfile(){
     timezone:$("timezone").value,
     publishWindow:{startHour:parseInt($("windowStart").value),endHour:parseInt($("windowEnd").value)},
     cadence:cadence,
+    publishDays:getPublishDays(),
     authority:{enabled:$("authorityToggle").checked,features:[]},
     tracking:{gtagId:gtagVal||null},
     author:{
