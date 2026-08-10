@@ -431,6 +431,8 @@ function drawCalendar(byDate, pubDates) {
     } else if (isPublished) {
       var pubTime = getPubTime(ds);
       cellContent += '<div class="plan-time" style="color:var(--ok)">\u2713 ' + (pubTime || 'Published') + '</div>';
+      var pubTopic = getPubTopic(ds);
+      if (pubTopic) cellContent += '<div class="topic" style="color:var(--ok)">' + escapeHtml(pubTopic) + '</div>';
     } else if (items.length) {
       // Future queued item — show its pre-rolled scheduledTime if present
       var st = items[0].scheduledTime;
@@ -455,6 +457,17 @@ function getPubTime(dateStr) {
     if ((h.published_at || "").slice(0, 10) === dateStr) {
       var dt = new Date(h.published_at);
       if (!isNaN(dt.getTime())) return String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+    }
+  }
+  return null;
+}
+
+// Look up the topic/title from history for a given date
+function getPubTopic(dateStr) {
+  for (var i = 0; i < (calHistory || []).length; i++) {
+    var h = calHistory[i];
+    if ((h.published_at || "").slice(0, 10) === dateStr) {
+      return h.title || h.topic || null;
     }
   }
   return null;
