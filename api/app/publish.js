@@ -836,6 +836,15 @@ const READ_MORE_LABELS = {
   pt: "Leia mais →",
   nl: "Lees meer →",
   pl: "Czytaj więcej →",
+  sv: "Läs mer →",
+  da: "Læs mere →",
+  no: "Les mer →",
+  fi: "Lue lisää →",
+  ja: "続きを読む →",
+  ko: "더 읽기 →",
+  zh: "阅读更多 →",
+  ar: "اقرأ المزيد ←",
+  hi: "और पढ़ें →",
 };
 const FAQ_HEADINGS = {
   en: "Frequently asked questions",
@@ -847,6 +856,15 @@ const FAQ_HEADINGS = {
   pt: "Perguntas frequentes",
   nl: "Veelgestelde vragen",
   pl: "Często zadawane pytania",
+  sv: "Vanliga frågor",
+  da: "Ofte stillede spørgsmål",
+  no: "Ofte stilte spørsmål",
+  fi: "Usein kysytyt kysymykset",
+  ja: "よくある質問",
+  ko: "자주 묻는 질문",
+  zh: "常见问题",
+  ar: "الأسئلة الشائعة",
+  hi: "अक्सर पूछे जाने वाले प्रश्न",
 };
 function injectTracking(html, gtagId, lang) {
   // Sanitize — only allow alphanumeric, hyphen, underscore
