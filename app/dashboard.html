@@ -83,6 +83,9 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .badge.wp{background:#E0E7FF;color:#3730A3}
 .badge.active{background:var(--ok-bg);color:var(--ok)}
 .badge.paused{background:var(--warn-bg);color:var(--warn)}
+.badge.clickable{cursor:pointer;transition:filter .12s,transform .1s;user-select:none}
+.badge.clickable:hover{filter:brightness(0.95);transform:scale(1.05)}
+.badge.clickable[data-busy="1"]{opacity:.55;pointer-events:none}
 .tcard-meta{display:flex;gap:8px;flex-wrap:wrap}
 
 /* Stats row */
@@ -269,7 +272,7 @@ function renderTenants(tenants) {
     return '<div class="tcard" onclick="openTenant(\'' + encodeURIComponent(t.id) + '\')">' +
       '<h3>' + escapeHtml(t.siteName || t.id) + '</h3>' +
       '<div class="url">' + escapeHtml(t.id) + '</div>' +
-      '<div class="tcard-meta"><span class="badge ' + (t.status==='active'?'active':'paused') + '">' + escapeHtml(t.status||'active') + '</span></div></div>';
+      '<div class="tcard-meta"><span class="badge clickable ' + (t.status==='active'?'active':'paused') + '" data-tenant="' + escapeHtml(t.id) + '" onclick="event.stopPropagation();toggleStatus(\'' + encodeURIComponent(t.id) + '\',\'' + escapeHtml(t.status||'active') + '\',this)">' + escapeHtml(t.status||'active') + '</span></div></div>';
   }).join("");
 }
 
@@ -338,7 +341,7 @@ function renderDetail(id, profile, q) {
   var html = '<div class="detail-head">' +
     '<h2>' + escapeHtml(profile.siteName || id) + '</h2>' +
     '<div style="display:flex;gap:8px;align-items:center">' + intBadge +
-    '<span class="badge ' + ((profile.status||'active')==='active'?'active':'paused') + '">' + escapeHtml(profile.status||'active') + '</span></div></div>' +
+    '<span class="badge clickable ' + ((profile.status||'active')==='active'?'active':'paused') + '" id="statusBadge" onclick="toggleStatus(\'' + encodeURIComponent(id) + '\',\'' + escapeHtml(profile.status||'active') + '\',this)">' + escapeHtml(profile.status||'active') + '</span></div></div>' +
     '<div class="stats">' +
     '<div class="stat"><div class="n">' + queue.length + '</div><div class="l">Queued</div></div>' +
     '<div class="stat"><div class="n">' + history.length + '</div><div class="l">Published</div></div>' +
@@ -638,6 +641,65 @@ async function saveDays() {
   } else {
     showToast("Days saved, but re-date failed: " + ((rd.data && rd.data.error) || "unknown"), "err");
   }
+}
+
+/* ─── Status toggle (pause / resume tenant) ─── */
+async function toggleStatus(encId, currentStatus, badgeEl) {
+  var id = decodeURIComponent(encId);
+  if (badgeEl && badgeEl.dataset.busy === "1") return;
+
+  var currentIsActive = currentStatus === "active";
+  var newStatus = currentIsActive ? "paused" : "active";
+  var action = currentIsActive ? "pause" : "resume";
+
+  var confirmed = confirm("Are you sure you want to " + action + " " + id + "?" +
+    (currentIsActive ? "\n\nCron will stop publishing for this tenant until you resume it." : "\n\nCron will resume publishing on the next allowed publish day."));
+  if (!confirmed) return;
+
+  if (badgeEl) badgeEl.dataset.busy = "1";
+
+  // Fetch the current full profile so we don't drop fields on save.
+  // Even when called from the detail view (currentProfile stashed), we re-fetch
+  // to guarantee we're not saving stale data if the operator opened multiple tabs.
+  var profRes = await api("GET", "/tenants?id=" + encodeURIComponent(id));
+  if (!(profRes.ok && profRes.data && profRes.data.ok)) {
+    if (badgeEl) badgeEl.dataset.busy = "";
+    showToast("Could not load tenant profile", "err");
+    return;
+  }
+
+  var newProfile;
+  try { newProfile = JSON.parse(JSON.stringify(profRes.data.profile)); }
+  catch(e) { newProfile = Object.assign({}, profRes.data.profile); }
+  newProfile.status = newStatus;
+
+  var r = await api("POST", "/tenants", { action: "update", id: id, profile: newProfile });
+  if (badgeEl) badgeEl.dataset.busy = "";
+
+  if (!(r.ok && r.data && r.data.ok)) {
+    showToast((r.data && r.data.error) || "Save failed", "err");
+    return;
+  }
+
+  // Success — update UI in place
+  if (badgeEl) {
+    badgeEl.classList.remove(currentIsActive ? "active" : "paused");
+    badgeEl.classList.add(newStatus);
+    badgeEl.textContent = newStatus;
+    // Update inline handler so the next click has fresh state
+    badgeEl.setAttribute("onclick",
+      (badgeEl.closest(".tcard") ? "event.stopPropagation();" : "") +
+      "toggleStatus('" + encodeURIComponent(id) + "','" + newStatus + "',this)"
+    );
+  }
+
+  // Keep local caches in sync
+  if (currentTenantId === id && currentProfile) currentProfile.status = newStatus;
+  for (var i = 0; i < TENANTS.length; i++) {
+    if (TENANTS[i].id === id) { TENANTS[i].status = newStatus; break; }
+  }
+
+  showToast(id + " " + (newStatus === "paused" ? "paused" : "resumed"), "ok");
 }
 
 function escapeHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
