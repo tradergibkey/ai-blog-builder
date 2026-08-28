@@ -23,7 +23,10 @@ import { getProfile } from "./_profile.js";
 import { getRaw, setRaw } from "./_store.js";
 import { pickArchetype, buildOutlineDirective } from "../../lib/article-structure.js";
 
-export const config = { maxDuration: 120 };
+// maxDuration bumped 120 → 300 (2026-08-28): Hungarian generation (emlektabla)
+// was hitting the 105s Claude timeout consistently since Aug 15. 300s is the
+// Vercel Hobby ceiling. See CLAUDE_TIMEOUT_MS below for the actual Claude cap.
+export const config = { maxDuration: 300 };
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
 
@@ -147,12 +150,13 @@ ${outlineDirective}
 Write the complete article in ${langName}. Make it practical, engaging, and SEO-optimized.`;
 
     // ---- 3) Call Claude (hardened) ----
-    // Vercel function budget is 120s (see config.maxDuration above). We reserve
-    // ~15s for post-processing (KV archetype write, response serialization) and
-    // give Claude up to 105s. Beyond that we abort cleanly instead of getting
-    // killed by Vercel's function-level timeout — which produces a much uglier
-    // 504 with no clean error path for cron to retry.
-    const CLAUDE_TIMEOUT_MS = 105_000;
+    // Vercel function budget is 300s (see config.maxDuration above, bumped
+    // 2026-08-28 from 120s). We reserve ~15s for post-processing (KV archetype
+    // write, response serialization) and give Claude up to 285s. Beyond that
+    // we abort cleanly instead of getting killed by Vercel's function-level
+    // timeout — which produces a much uglier 504 with no clean error path for
+    // cron to retry.
+    const CLAUDE_TIMEOUT_MS = 285_000;
     const ctrl = new AbortController();
     const timeoutId = setTimeout(() => ctrl.abort(), CLAUDE_TIMEOUT_MS);
     const t0 = Date.now();
