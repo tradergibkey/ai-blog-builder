@@ -58,7 +58,11 @@ import { getProfile } from "./_profile.js";
 import { getSecret } from "./_secrets.js";
 import { addHistory, getHistory, getStr, setStr } from "./_store.js";
 import { checkDuplicate, recordPost } from "../../lib/similarity-guard.js";
-export const config = { maxDuration: 180 };
+// maxDuration bumped 180 → 300 (2026-08-28): needs to be ≥ generate.js's 300s
+// budget since publish invokes generate internally as a nested function call.
+// If publish times out before generate finishes, the cron sees a 500 and marks
+// the plan failed — exactly the pattern that caused emlektabla's 10-day outage.
+export const config = { maxDuration: 300 };
 // KV wrappers for similarity-guard (strip "abb:" prefix — _store adds its own)
 const kvGet = (k) => getStr(k.startsWith("abb:") ? k.slice(4) : k);
 const kvSet = (k, v) => setStr(k.startsWith("abb:") ? k.slice(4) : k, v);
