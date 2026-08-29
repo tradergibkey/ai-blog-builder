@@ -1,255 +1,113 @@
-// =============================================================================
-//  AI BLOG BUILDER  —  api/app/generate.js   (PHASE 2 — piece 2)
-// -----------------------------------------------------------------------------
-//  Tenant-aware content generator. Reads the tenant profile (voice, language,
-//  categories, audience, niche) and generates an article via Claude.
-//
-//  STRUCTURAL VARIETY (Phase 7): each post is written to a different archetype
-//  (deep-dive, listicle, comparison, how-to, Q&A, case-study, opinion) so
-//  consecutive articles don't share a skeleton — the templating signal Google
-//  flags at the site level.
-//
-//  Returns structured JSON — does NOT publish. publish.js handles that.
-//
-//  POST /api/app/generate  { id: "elsyfx.net", topic: "...", category: "..." }
-//
-//  Returns: { ok, article: { title, body, excerpt, metaDescription, imageQuery, language, archetype } }
-//
-//  AUTH: x-app-secret (operator only)
-//  ENV:  ABB_APP_SECRET, ANTHROPIC_API_KEY
-// =============================================================================
+# Patch for `api/app/generate.js` — inject `serviceLinks` into the LLM prompt
 
-import { getProfile } from "./_profile.js";
-import { getRaw, setRaw } from "./_store.js";
-import { pickArchetype, buildOutlineDirective } from "../../lib/article-structure.js";
+## What this does
 
-// maxDuration bumped 120 → 300 (2026-08-28): Hungarian generation (emlektabla)
-// was hitting the 105s Claude timeout consistently since Aug 15. 300s is the
-// Vercel Hobby ceiling. See CLAUDE_TIMEOUT_MS below for the actual Claude cap.
-export const config = { maxDuration: 300 };
+Adds support for the new `serviceLinks` profile field so the LLM knows which
+service pages exist, when each is topically appropriate, and that exactly one
+should be linked from each article. Existing `LINKED_PATHS` (prior posts)
+logic is left completely alone — service links live in their own approved
+block, separate from post-to-post interlinking.
 
-const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
+## Three edits — apply in order
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
-  if (!process.env.ABB_APP_SECRET || req.headers["x-app-secret"] !== process.env.ABB_APP_SECRET) {
-    return res.status(401).json({ error: "Unauthorised." });
-  }
+Open `api/app/generate.js` on GitHub, click the pencil icon to edit. Do
+these three find-and-replaces in order.
 
-  const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-  const id       = (body.id || "").trim();
-  const topic    = (body.topic || "").trim();
-  const category = (body.category || "").trim();
+---
 
-  if (!id)    return res.status(400).json({ error: "Missing tenant 'id'." });
-  if (!topic) return res.status(400).json({ error: "Missing 'topic'." });
+### EDIT 1 — extract the new field
 
-  try {
-    // ---- 1) Load the tenant profile ----
-    const profile = await getProfile(id);
-    if (!profile) return res.status(404).json({ error: `Tenant "${id}" not found.` });
+**Find** (in the profile-loading block near the top of the handler):
 
-    const lang      = profile.primaryLanguage || "en";
-    const langName  = LANG_NAMES[lang] || "English";
-    const voice     = profile.voice || "Professional and helpful.";
-    const audience  = profile.audience || "general readers";
-    const niche     = profile.niche || "";
-    const siteName  = profile.siteName || "the blog";
-    const cats      = (profile.categories || []).join(", ") || "general";
+```js
+const cats      = (profile.categories || []).join(", ") || "general";
+```
 
-    // ---- 1b) Pick a structural archetype ----
-    const recentKeys = (await getRaw(`t:${id}:archetypes`)) || [];
-    const { key: archetypeKey, archetype } = pickArchetype({ recentKeys });
-    const outlineDirective = buildOutlineDirective(archetype, topic);
+**Replace with**:
 
-    // ---- 2) Build the Claude prompt ----
-    const system = `You are an expert blog content writer for "${siteName}".
+```js
+const cats      = (profile.categories || []).join(", ") || "general";
+const serviceLinks = Array.isArray(profile.serviceLinks) ? profile.serviceLinks : [];
+```
 
-AUDIENCE: ${audience}
-NICHE: ${niche}
-LANGUAGE: Write the ENTIRE article in ${langName}.
+---
 
-WRITING VOICE & TONE:
-${voice}
+### EDIT 2 — build the APPROVED SERVICE LINKS prompt block
 
-CONTENT RULES:
-- Write a complete, publish-ready blog article on the given topic.
-- Use HTML formatting for the body (h2, h3, p, ul, li, strong, em — NO h1, that's the title).
-- Include practical, actionable advice. No fluff or filler.
-- Write from the perspective of ${siteName}, as if the business is the author.
-- Do NOT include any header/footer, navigation, CSS, or page wrapper — just the article body HTML.
-- Do NOT start with "In this article" or "In today's post" — start with a compelling opening.
+**Find** (the line that builds the LINKED_PATHS block string — search for
+`LINKED_PATHS` and locate the line where the block header is composed):
 
-AI CITATION OPTIMIZATION:
-- Start the article with a clear, factual definition or summary paragraph (1-3 sentences) that directly answers the topic as a question. This is what AI search engines (ChatGPT, Perplexity, Google AI) quote in their answers.
-- Throughout the article, use concrete, quotable statements rather than vague generalities. Specific numbers, comparisons, and direct answers perform best.
-- End with a concise "Összefoglalás" (Summary) or "Legfontosabb tudnivalók" (Key takeaways) section — 3-5 bullet points summarizing the article's main advice in clear, self-contained sentences.
+```js
+const linkedBlock = linkedPaths.length
+```
 
-SEO RULES:
-- The title should be SEO-friendly (the kind of thing someone would type into Google).
-- Include a meta description (150-160 chars, compelling, includes the main keyword).
-- The excerpt should be 1-2 sentences summarizing the article.
+**Replace with** (adds a parallel `serviceBlock` builder just above, then
+keeps `linkedBlock` exactly as it was):
 
-FAQ:
-- Generate 3-5 frequently asked questions (and their answers) related to the article topic.
-- Questions should be what real people would type into Google or ask a voice assistant — natural, specific, practical.
-- Answers should be 2-3 sentences each: direct, factual, self-contained (each answer should make sense on its own without reading the article).
-- Write both questions and answers in ${langName}.
+```js
+const serviceBlock = serviceLinks.length
+  ? `\n\nAPPROVED SERVICE LINKS (link to exactly ONE, in the body where it's topically natural):\n${
+      serviceLinks.map(s => `- ${s.path} — "${s.title}" — use when: ${s.when}`).join("\n")
+    }\n\nSERVICE LINK RULES:\n- Include exactly ONE link from the list above per article, and only if a topical fit exists.\n- Choose the entry whose "use when" best matches the article's actual subject — do not force a link into an off-topic article.\n- Place it inline in the body where it flows naturally (usually in the section discussing that specialism), not in the intro or the closing block.\n- Use natural, descriptive anchor text ("specialist expat mortgage broker", "buy-to-let finance") — never paste the URL as anchor text, never use "click here" or "learn more".\n- This link is IN ADDITION TO any LINKED_PATHS post links below — do not confuse the two.`
+  : "";
+const linkedBlock = linkedPaths.length
+```
 
-IMAGE:
-- Suggest THREE Pexels search queries (2-4 words each) for relevant, professional photos:
-  1. heroImageQuery: for the hero/banner image at the top — should represent the article's main topic visually.
-  2. inlineImageQuery1: for an image placed after the first major section — should match THAT section's specific subject.
-  3. inlineImageQuery2: for an image placed after the second major section — should match THAT section's specific subject.
-- IMPORTANT: Each query should be specific and visual (e.g. "polished black granite surface", "white marble veins closeup", "stone engraving workshop"). Avoid generic queries like "memorial" or "plaque" — search for the MATERIAL, TEXTURE, PROCESS, or SETTING described in that section.
-- All three queries must be meaningfully different from each other.
-- Place the literal marker {{INLINE_IMG_1}} in the body HTML after the first major H2 section ends (before the next H2).
-- Place the literal marker {{INLINE_IMG_2}} in the body HTML after the second major H2 section ends (before the next H2).
-- Do NOT wrap these markers in any HTML tag — just place them on their own line between sections.
+---
 
-Call the write_article tool with your complete article.`;
+### EDIT 3 — inject `serviceBlock` into the system prompt
 
-    const tool = {
-      name: "write_article",
-      description: "Submit the complete generated article.",
-      input_schema: {
-        type: "object",
-        properties: {
-          title:           { type: "string", description: "SEO-friendly article title" },
-          body:            { type: "string", description: "Full article body in HTML (h2, h3, p, ul, li — no h1). Must include {{INLINE_IMG_1}} after the first H2 section and {{INLINE_IMG_2}} after the second H2 section." },
-          excerpt:         { type: "string", description: "1-2 sentence summary" },
-          metaDescription: { type: "string", description: "SEO meta description, 150-160 chars" },
-          heroImageQuery:      { type: "string", description: "Pexels search query for the hero banner image, 2-4 words, specific to the article topic" },
-          inlineImageQuery1:   { type: "string", description: "Pexels search query for inline image after section 1, 2-4 words, specific to that section" },
-          inlineImageQuery2:   { type: "string", description: "Pexels search query for inline image after section 2, 2-4 words, specific to that section" },
-          faq: {
-            type: "array",
-            description: "3-5 FAQ items related to the article topic",
-            items: {
-              type: "object",
-              properties: {
-                question: { type: "string", description: "A natural question someone would ask" },
-                answer:   { type: "string", description: "Direct 2-3 sentence answer" },
-              },
-              required: ["question", "answer"],
-            },
-          },
-        },
-        required: ["title", "body", "excerpt", "metaDescription", "heroImageQuery", "inlineImageQuery1", "inlineImageQuery2", "faq"],
-      },
-    };
+**Find** (the line in the system prompt template where `linkedBlock` is
+inserted — search for `${linkedBlock}`):
 
-    const userMsg = `Write a blog article on this topic:
+```js
+${linkedBlock}
+```
 
-TOPIC: ${topic}
-${category ? `CATEGORY: ${category}` : ""}
+**Replace with**:
 
-STRUCTURAL BLUEPRINT — follow this structure for this article:
-${outlineDirective}
+```js
+${serviceBlock}
+${linkedBlock}
+```
 
-Write the complete article in ${langName}. Make it practical, engaging, and SEO-optimized.`;
+Only the first occurrence — there's only one in the file.
 
-    // ---- 3) Call Claude (hardened) ----
-    // Vercel function budget is 300s (see config.maxDuration above, bumped
-    // 2026-08-28 from 120s). We reserve ~15s for post-processing (KV archetype
-    // write, response serialization) and give Claude up to 285s. Beyond that
-    // we abort cleanly instead of getting killed by Vercel's function-level
-    // timeout — which produces a much uglier 504 with no clean error path for
-    // cron to retry.
-    const CLAUDE_TIMEOUT_MS = 285_000;
-    const ctrl = new AbortController();
-    const timeoutId = setTimeout(() => ctrl.abort(), CLAUDE_TIMEOUT_MS);
-    const t0 = Date.now();
+---
 
-    let claudeRes;
-    try {
-      claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          // max_tokens was 4000 — too tight for a full Hungarian HTML article
-          // + FAQ + image queries + tool JSON overhead. When Claude hit the cap
-          // it returned stop_reason:"max_tokens" with a partially-serialized
-          // tool_use.input where `body` was truncated/empty, surfacing
-          // downstream as "Article missing title or body." Bumped to 8000.
-          max_tokens: 8000,
-          system,
-          messages: [{ role: "user", content: userMsg }],
-          tools: [tool],
-          tool_choice: { type: "tool", name: "write_article" },
-        }),
-        signal: ctrl.signal,
-      });
-    } catch (fetchErr) {
-      if (fetchErr.name === "AbortError") {
-        throw new Error(`Claude API timed out after ${CLAUDE_TIMEOUT_MS / 1000}s`);
-      }
-      throw new Error(`Claude fetch failed: ${fetchErr.message}`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    const dtMs = Date.now() - t0;
+## Verify after commit
 
-    if (!claudeRes.ok) {
-      throw new Error(`Claude API ${claudeRes.status} after ${dtMs}ms: ${(await claudeRes.text()).slice(0, 300)}`);
-    }
+1. Vercel redeploys automatically (~30s). Wait for it to finish.
+2. Trigger a test publish for Agnes (dashboard force-publish, or wait for
+   next cron). Read the resulting post.
+3. Check three things:
+   - Does the article naturally reference £500 fee / whole-of-market /
+     multilingual / WhatsApp *only when the topic warrants it*?
+     (Not every post — a post on 'How the Bank of England base rate
+     affects fixed mortgages' probably shouldn't mention Agnes's fee;
+     a post on 'Should you use a broker or apply direct?' definitely
+     should.)
+   - Is there exactly one contextual link to a service page in the body,
+     with descriptive anchor text?
+   - Does the article end with a natural 'Working with Agnes Mortgage'
+     (or topical equivalent) closing paragraph linking to `/#contact`?
+4. If any of these misfire, iterate the `voice` field in the profile —
+   no more code changes needed. The voice rules are prose the LLM
+   follows; tighten or loosen wording there.
 
-    const claudeData = await claudeRes.json();
+## What this doesn't do
 
-    // Detect max_tokens truncation explicitly — this WAS the silent failure
-    // that produced the confusing downstream "Article missing title or body."
-    if (claudeData.stop_reason === "max_tokens") {
-      throw new Error(`Claude output truncated at max_tokens after ${dtMs}ms. Article incomplete — raise max_tokens or reduce prompt complexity.`);
-    }
+- Does not touch `LINKED_PATHS` (post-to-post interlinking) — that keeps
+  working exactly as before.
+- Does not add a new UI toggle in the dashboard — `serviceLinks` is
+  edited through the profile update path (DevTools snippet or Upstash
+  Data Browser), same as any other profile field.
+- Does not affect other tenants — emlektabla, campoverde etc. have no
+  `serviceLinks` on their profiles, so the block simply doesn't render
+  for them and their prompts are unchanged.
 
-    const block = (claudeData.content || []).find(b => b.type === "tool_use");
-    if (!block || !block.input) throw new Error(`Claude returned no tool_use block after ${dtMs}ms. stop_reason=${claudeData.stop_reason}`);
+## Rollback
 
-    const article = block.input;
-
-    // Validate here — fail with a clear error instead of returning ok:true with
-    // a broken article that publish.js then rejects with a misleading 400.
-    if (!article.title || !article.body) {
-      throw new Error(`Claude returned incomplete article (title=${!!article.title}, body=${!!article.body}) after ${dtMs}ms. stop_reason=${claudeData.stop_reason}`);
-    }
-
-    console.log(`[generate] ${id}: ok in ${dtMs}ms, ${article.body.length} body chars, stop_reason=${claudeData.stop_reason}, archetype=${archetypeKey}`);
-
-    article.language = lang;
-    article.category = category;
-    article.topic = topic;
-    article.archetype = archetypeKey; // track which skeleton was used
-
-    // ---- 4) Store archetype key for rotation ----
-    const updatedKeys = [archetypeKey, ...recentKeys.filter(k => k !== archetypeKey)].slice(0, 20);
-    await setRaw(`t:${id}:archetypes`, updatedKeys);
-
-    // Backward compat: old WP publish path reads article.imageQuery
-    // New schema uses heroImageQuery / inlineImageQuery1 / inlineImageQuery2
-    if (article.heroImageQuery && !article.imageQuery) {
-      article.imageQuery = article.heroImageQuery;
-    }
-    // If Claude used the old field name (shouldn't, but defensive)
-    if (article.imageQuery && !article.heroImageQuery) {
-      article.heroImageQuery = article.imageQuery;
-    }
-
-    return res.status(200).json({ ok: true, id, article });
-
-  } catch (err) {
-    console.error("generate error:", err);
-    return res.status(500).json({ error: String(err && err.message || err) });
-  }
-}
-
-const LANG_NAMES = {
-  en: "English", es: "Spanish", de: "German", fr: "French", it: "Italian",
-  pt: "Portuguese", nl: "Dutch", hu: "Hungarian", pl: "Polish", sv: "Swedish",
-  da: "Danish", no: "Norwegian", fi: "Finnish", ja: "Japanese", ko: "Korean",
-  zh: "Chinese", ar: "Arabic", hi: "Hindi",
-};
+If output looks worse instead of better, revert both files (profile JSON
+and generate.js) in one step. Zero downstream dependencies — nothing
+else in ABB reads `serviceLinks`.
