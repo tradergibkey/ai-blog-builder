@@ -129,7 +129,7 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 /* Calendar */
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
 .cal .dow{font-family:var(--font-mono);font-size:10px;font-weight:700;color:var(--muted);text-align:center;text-transform:uppercase;letter-spacing:.1em;padding:5px 0}
-.cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:10px;padding:5px 6px;font-size:12px;min-height:48px;background:var(--surface);position:relative}
+.cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:10px;padding:4px 5px;font-size:12px;min-height:48px;background:var(--surface);position:relative;overflow:hidden}
 .cal .day.empty{border:none;background:transparent}
 .cal .day .dn{color:var(--muted);font-size:11px;font-weight:600}
 .cal .day.has{background:var(--grad-soft);border-color:rgba(154,19,60,.35)}
@@ -137,7 +137,7 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .cal .day.published:has(a):hover{background:#D4EDDA}
 .cal .day.has.published{background:linear-gradient(135deg,var(--ok-bg) 50%,rgba(227,117,53,.12) 50%);border-color:rgba(21,128,61,.4)}
 .cal .day.today{box-shadow:0 0 0 2px var(--violet)}
-.cal .day .topic{font-size:9px;line-height:1.25;color:var(--violet);margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-weight:600}
+.cal .day .topic{font-size:9px;line-height:1.25;color:var(--violet);margin-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;font-weight:600;word-break:break-word}
 .cal .day .plan-time{font-family:var(--font-mono);font-size:9px;font-weight:700;color:var(--orange);margin-top:2px}
 .cal-link{display:block;color:inherit;text-decoration:none;cursor:pointer}
 .cal-link:hover{text-decoration:none}
@@ -481,12 +481,12 @@ function drawCalendar(byDate, pubDates) {
     // Today's cell: show plan topic + time (not the queue's first item)
     if (ds === todayStr && calPlan && (calPlan.status === "pending" || calPlan.status === "publishing")) {
       if (calPlan.target) cellContent += '<div class="plan-time">\u23F3 ' + escapeHtml(calPlan.target) + '</div>';
-      if (calPlan.topic) cellContent += '<div class="topic">' + escapeHtml(calPlan.topic) + '</div>';
+      if (calPlan.topic) cellContent += '<div class="topic" title="' + escapeHtml(calPlan.topic) + '">' + escapeHtml(calPlan.topic) + '</div>';
     } else if (isPublished) {
       var pubTime = getPubTime(ds);
       cellContent += '<div class="plan-time" style="color:var(--ok)">\u2713 ' + (pubTime || 'Published') + '</div>';
       var pubTopic = getPubTopic(ds);
-      if (pubTopic) cellContent += '<div class="topic" style="color:var(--ok)">' + escapeHtml(pubTopic) + '</div>';
+      if (pubTopic) cellContent += '<div class="topic" style="color:var(--ok)" title="' + escapeHtml(pubTopic) + '">' + escapeHtml(pubTopic) + '</div>';
       var pubUrl = getPubUrl(ds);
       if (pubUrl) {
         // Anchor wraps only the text. The delete button is a SIBLING, never a
@@ -504,7 +504,8 @@ function drawCalendar(byDate, pubDates) {
       if (typeof st === "string" && /^\d\d:\d\d$/.test(st)) {
         cellContent += '<div class="plan-time">\u23F3 ' + escapeHtml(st) + '</div>';
       }
-      cellContent += '<div class="topic">' + escapeHtml(items[0].topic||"") + '</div>';
+      var itemTopic = items[0].topic || "";
+      cellContent += '<div class="topic" title="' + escapeHtml(itemTopic) + '">' + escapeHtml(itemTopic) + '</div>';
     }
 
     html += '<div class="' + cls + '">' + delBtn + '<div class="dn">' + d + '</div>' + cellContent + '</div>';
