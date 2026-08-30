@@ -29,6 +29,12 @@
 //    • VELOCITY GATE (Phase 7): daily cap enforced via publish-policy.js —
 //      new domains ramp up slowly, established tenants capped per config.
 //
+//  ALERTING (2026-08-30):
+//    • Telegram notify on: permanent publish-failure (attempts >= 4),
+//      per-tenant thrown exception, top-level cron crash.
+//    • Test hook: ?test=telegram sends a ping and returns immediately.
+//    • Transient retries (attempts 1-3) stay silent — noise-free by design.
+//
 //  AUTH:  ?key=SECRET  or  x-app-secret header  or  Authorization: Bearer
 //         Accepts ABB_CRON_SECRET (recommended, optional) or ABB_APP_SECRET.
 // =============================================================================
@@ -37,6 +43,7 @@ import { listTenants, getQueue, saveQueue, getPlan, savePlan, getHistory, getStr
 import { getProfile } from "./_profile.js";
 import { hasSecret } from "./_secrets.js";
 import { canPublishNow, recordPublish } from "../../lib/publish-policy.js";
+import { notify } from "../../lib/telegram.js";
 
 export const config = { maxDuration: 300 };
 
@@ -53,6 +60,15 @@ export default async function handler(req, res) {
     || (req.headers.authorization || "").replace("Bearer ", "");
   const valid = provided && ((cronSecret && provided === cronSecret) || (appSecret && provided === appSecret));
   if (!valid) return res.status(401).json({ error: "Unauthorised." });
+
+  // ---- Telegram test hook ----
+  // GET /api/app/cron?key=SECRET&test=telegram → sends a ping and returns,
+  // without running the tenant loop. Lets the operator verify end-to-end
+  // after adding env vars, instead of waiting for a real failure.
+  if (req.query.test === "telegram") {
+    await notify("🧪 ABB Telegram test — bot is working. If you see this in your chat, alerts are live.");
+    return res.status(200).json({ ok: true, test: "telegram", note: "Message sent if TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set. Check your Telegram." });
+  }
 
   const BASE = process.env.SITE_BASE_URL || `https://${req.headers.host}`;
   const results = [];
@@ -201,6 +217,22 @@ export default async function handler(req, res) {
             plan.status = plan.attempts >= 4 ? "failed" : "pending";
             if (plan.attempts >= 4) plan.error = pub.error || `publish ${pubRes.status}`;
             await savePlan(t.id, plan);
+
+            // ── ALERT on permanent failure (attempts 1-3 stay silent —
+            //    transient errors often resolve on next 15-min ping) ──
+            if (plan.attempts >= 4) {
+              const topicShort = String(plan.topic || "").slice(0, 140);
+              const errShort   = String(plan.error || `publish ${pubRes.status}`).slice(0, 300);
+              await notify(
+                `🚨 ABB · ${t.id}\n` +
+                `Publish failed after 4 attempts — giving up until tomorrow.\n` +
+                `Target: ${plan.target}\n` +
+                `Topic: ${topicShort}\n` +
+                `Error: ${errShort}\n\n` +
+                `Recover: open the dashboard, use "Publish now" (input empty) to run this topic manually.`
+              );
+            }
+
             r.action = "retry"; r.attempt = plan.attempts; r.error = pub.error || pubRes.status; results.push(r); continue;
           }
         }
@@ -212,6 +244,13 @@ export default async function handler(req, res) {
       } catch (err) {
         r.action = "error"; r.error = String(err && err.message || err);
         results.push(r);
+
+        // ── ALERT on unexpected per-tenant exception ──
+        await notify(
+          `🚨 ABB · ${t.id}\n` +
+          `Cron threw during processing (tenant skipped this run).\n` +
+          `Error: ${String((err && err.message) || err).slice(0, 500)}`
+        );
       }
     }
 
@@ -219,6 +258,14 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error("abb-cron error:", err);
+
+    // ── ALERT on top-level cron crash (all tenants skipped this run) ──
+    await notify(
+      `🚨 ABB cron crashed\n` +
+      `All tenants skipped this run. Next attempt on the next 15-min ping.\n` +
+      `Error: ${String((err && err.message) || err).slice(0, 500)}`
+    );
+
     return res.status(500).json({ error: String(err && err.message || err) });
   }
 }
