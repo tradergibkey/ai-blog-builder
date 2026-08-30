@@ -39,6 +39,11 @@
 //  consent banner into the generated HTML before committing. Language-aware
 //  banner text pulled from the tenant's primaryLanguage.
 //
+//  DELETE POST (2026-08-30): operator-triggered removal of an already
+//  published github-static post. Removes the post file from the repo, removes
+//  its card from blog/index.html, drops the entry from tenant history, and
+//  writes an audit record. See deletePost() at the bottom of this file.
+//
 //  Flow:
 //    1. Read tenant profile (for draft/publish setting)
 //    2. Decrypt credentials
@@ -50,54 +55,73 @@
 //
 //  POST /api/app/publish  { id, topic, category }          → generate + publish
 //  POST /api/app/publish  { id, article: { title, body, excerpt, ... } } → publish only
+//  POST /api/app/publish  { id, action:"delete-post", url } → delete a published post
 //
 //  AUTH: x-app-secret (operator only)
 //  ENV:  ABB_APP_SECRET, ANTHROPIC_API_KEY, PEXELS_API_KEY (optional)
 // =============================================================================
+
 import { getProfile } from "./_profile.js";
 import { getSecret } from "./_secrets.js";
-import { addHistory, getHistory, getStr, setStr } from "./_store.js";
+import { addHistory, getHistory, saveHistory, getStr, setStr, setRaw } from "./_store.js";
 import { checkDuplicate, recordPost } from "../../lib/similarity-guard.js";
+
 // maxDuration bumped 180 → 300 (2026-08-28): needs to be ≥ generate.js's 300s
 // budget since publish invokes generate internally as a nested function call.
 // If publish times out before generate finishes, the cron sees a 500 and marks
 // the plan failed — exactly the pattern that caused emlektabla's 10-day outage.
 export const config = { maxDuration: 300 };
+
 // KV wrappers for similarity-guard (strip "abb:" prefix — _store adds its own)
 const kvGet = (k) => getStr(k.startsWith("abb:") ? k.slice(4) : k);
 const kvSet = (k, v) => setStr(k.startsWith("abb:") ? k.slice(4) : k, v);
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
   if (!process.env.ABB_APP_SECRET || req.headers["x-app-secret"] !== process.env.ABB_APP_SECRET) {
     return res.status(401).json({ error: "Unauthorised." });
   }
+
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
   const id = (body.id || "").trim();
   if (!id) return res.status(400).json({ error: "Missing tenant 'id'." });
+
   try {
     // ---- 1) Load profile + credentials ----
     const profile = await getProfile(id);
     if (!profile) return res.status(404).json({ error: `Tenant "${id}" not found.` });
+
+    // ---- DELETE POST (operator action from the dashboard) ----
+    //  Routed before the publish paths so it never touches the generation
+    //  pipeline. github-static only — see deletePost() for the reasoning.
+    if (body.action === "delete-post") {
+      return await deletePost(res, id, profile, body);
+    }
+
     // ---- Route by integration type. github-static publishes by committing an
     //      HTML file to the tenant's repo; WordPress (default) continues below. ----
     if (profile.integration?.type === "github-static") {
       return await publishToGitHub(req, res, id, profile, body);
     }
+
     const wpUrl     = await getSecret(id, "wp_url");
     const wpUser    = await getSecret(id, "wp_username");
     const wpAppPass = await getSecret(id, "wp_app_password");
     if (!wpUrl || !wpUser || !wpAppPass) {
       return res.status(400).json({ error: "WordPress not connected. Add credentials in the wizard." });
     }
+
     const base = wpUrl.replace(/\/+$/, "");
     const auth = Buffer.from(`${wpUser}:${wpAppPass}`).toString("base64");
     const headers = { "Authorization": `Basic ${auth}`, "User-Agent": "AIBlogBuilder/2.0" };
+
     // ---- 2) Get the article (pre-generated or generate now) ----
     let article = body.article || null;
     if (!article) {
       const topic    = (body.topic || "").trim();
       const category = (body.category || "").trim();
       if (!topic) return res.status(400).json({ error: "Provide either 'article' or 'topic'." });
+
       // Call our own generate endpoint internally
       const siteBase = process.env.SITE_BASE_URL || `https://${req.headers.host}`;
       const genRes = await fetch(`${siteBase}/api/app/generate`, {
@@ -111,14 +135,17 @@ export default async function handler(req, res) {
       }
       article = genData.article;
     }
+
     if (!article || !article.title || !article.body) {
       return res.status(400).json({ error: "Article missing title or body." });
     }
+
     // ── SIMILARITY GUARD: reject near-duplicate content before publishing ──
     const dupCheck = await checkDuplicate({ tenant: id, draftText: article.body, kvGet }).catch(e => {
       console.error(`[${id}] Similarity check failed (allowing publish):`, e.message);
       return { isDuplicate: false, maxScore: 0, against: null, draftShingles: [] };
     });
+
     if (dupCheck.isDuplicate) {
       return res.status(409).json({
         error: "Near-duplicate content detected",
@@ -127,6 +154,7 @@ export default async function handler(req, res) {
         score: dupCheck.maxScore,
       });
     }
+
     // ---- 3) Upload hero image (optional — needs PEXELS_API_KEY) ----
     let featuredMediaId = null;
     if (article.imageQuery && process.env.PEXELS_API_KEY) {
@@ -136,6 +164,7 @@ export default async function handler(req, res) {
         console.error("Hero image upload failed (continuing without):", e.message);
       }
     }
+
     // ---- 3b) Inline images (hotlinked Pexels URLs inserted into body HTML) ----
     let wpBody = article.body || "";
     const wpImgWarnings = [];
@@ -159,6 +188,7 @@ export default async function handler(req, res) {
       }
       wpBody = injectInlineImages(wpBody, wpInline1, wpInline2, wInlQ1, wInlQ2);
     }
+
     // Internal links (Phase 5a) — opt-in via profile.authority.enabled, needs history
     if (profile.authority?.enabled) {
       try {
@@ -168,11 +198,13 @@ export default async function handler(req, res) {
         console.error(`[${id}] Internal linking failed (continuing):`, e.message);
       }
     }
+
     // FAQ section (Phase 5b) — visible HTML + FAQPage JSON-LD
     if (article.faq && article.faq.length) {
       const wpLang = article.language || profile.primaryLanguage || "en";
       wpBody = appendFaq(wpBody, article.faq, wpLang);
     }
+
     // ---- 4) Create the post ----
     const publishAs = profile.integration?.defaults?.publishAs || "draft";
     const postPayload = {
@@ -181,9 +213,11 @@ export default async function handler(req, res) {
       excerpt: article.excerpt || "",
       status:  publishAs,   // "draft" or "publish"
     };
+
     if (featuredMediaId) {
       postPayload.featured_media = featuredMediaId;
     }
+
     // Try to find or create the WP category
     if (article.category) {
       try {
@@ -193,22 +227,27 @@ export default async function handler(req, res) {
         console.error("Category mapping failed (continuing):", e.message);
       }
     }
+
     const postRes = await fetch(`${base}/wp-json/wp/v2/posts`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify(postPayload),
     });
+
     if (!postRes.ok) {
       const errText = (await postRes.text()).slice(0, 500);
       throw new Error(`WordPress create post failed (${postRes.status}): ${errText}`);
     }
+
     const post = await postRes.json();
+
     // ── SIMILARITY GUARD: record this post's fingerprint for future checks ──
     if (dupCheck.draftShingles && dupCheck.draftShingles.length) {
       await recordPost({
         tenant: id, postId: `wp-${post.id}`, draftShingles: dupCheck.draftShingles, kvGet, kvSet,
       }).catch(e => console.error(`[${id}] Shingle record failed (non-critical):`, e.message));
     }
+
     // ---- 5) Log to tenant history ----
     await addHistory(id, {
       wpPostId:     post.id,
@@ -221,6 +260,7 @@ export default async function handler(req, res) {
       archetype:    article.archetype || null,
       published_at: new Date().toISOString(),
     });
+
     return res.status(200).json({
       ok: true, id,
       post: {
@@ -232,21 +272,26 @@ export default async function handler(req, res) {
         archetype: article.archetype || null,
       },
     });
+
   } catch (err) {
     console.error("publish error:", err);
     return res.status(500).json({ error: String(err && err.message || err) });
   }
 }
+
 // =============================================================================
 //  GITHUB-STATIC PUBLISHER
 // =============================================================================
+
 async function publishToGitHub(req, res, id, profile, body) {
   const repo   = await getSecret(id, "github_repo");
   const branch = (await getSecret(id, "github_branch")) || "main";
   const token  = await getSecret(id, "github_token");
+
   if (!repo || !token) {
     return res.status(400).json({ error: "GitHub not connected. Add repo + token in the wizard." });
   }
+
   const gh = {
     token,
     api: `https://api.github.com/repos/${repo}/contents`,
@@ -257,12 +302,14 @@ async function publishToGitHub(req, res, id, profile, body) {
       "X-GitHub-Api-Version": "2022-11-28",
     },
   };
+
   // ---- 1) Get the article (pre-generated or generate now) ----
   let article = body.article || null;
   if (!article) {
     const topic    = (body.topic || "").trim();
     const category = (body.category || "").trim();
     if (!topic) return res.status(400).json({ error: "Provide either 'article' or 'topic'." });
+
     const siteBase = process.env.SITE_BASE_URL || `https://${req.headers.host}`;
     const genRes = await fetch(`${siteBase}/api/app/generate`, {
       method: "POST",
@@ -275,14 +322,17 @@ async function publishToGitHub(req, res, id, profile, body) {
     }
     article = genData.article;
   }
+
   if (!article || !article.title || !article.body) {
     return res.status(400).json({ error: "Article missing title or body." });
   }
+
   // ── SIMILARITY GUARD: reject near-duplicate content before committing ──
   const dupCheck = await checkDuplicate({ tenant: id, draftText: article.body, kvGet }).catch(e => {
     console.error(`[${id}] Similarity check failed (allowing publish):`, e.message);
     return { isDuplicate: false, maxScore: 0, against: null, draftShingles: [] };
   });
+
   if (dupCheck.isDuplicate) {
     return res.status(409).json({
       error: "Near-duplicate content detected",
@@ -291,14 +341,17 @@ async function publishToGitHub(req, res, id, profile, body) {
       score: dupCheck.maxScore,
     });
   }
+
   // ---- 2) Images: hero + 2 inline (all hotlinked Pexels URLs) ----
   let heroImg = "";
   let inlineImg1 = "";
   let inlineImg2 = "";
   const imgWarnings = [];
+
   const heroQuery   = article.heroImageQuery || article.imageQuery || "";
   const inlQ1       = article.inlineImageQuery1 || "";
   const inlQ2       = article.inlineImageQuery2 || "";
+
   if (process.env.PEXELS_API_KEY) {
     // Hero
     if (heroQuery) {
@@ -320,16 +373,20 @@ async function publishToGitHub(req, res, id, profile, body) {
     if (inlineImg2 && inlineImg2 === heroImg) { inlineImg2 = ""; imgWarnings.push("inline2 de-duped (same as hero)"); }
     if (inlineImg2 && inlineImg2 === inlineImg1) { inlineImg2 = ""; imgWarnings.push("inline2 de-duped (same as inline1)"); }
   }
+
   // Fallback hero
   if (!heroImg) heroImg = `${(profile.siteUrl || "").replace(/\/+$/, "")}/img/og-cover.jpg`;
+
   // Log shortages
   const imgCount = 1 + (inlineImg1 ? 1 : 0) + (inlineImg2 ? 1 : 0);
   if (imgCount < 3) {
     console.warn(`[${id}] Image shortage: ${imgCount}/3 images found.`, imgWarnings.join("; "));
   }
+
   // Inject inline images into article body
   let articleBody = article.body || "";
   articleBody = injectInlineImages(articleBody, inlineImg1, inlineImg2, inlQ1, inlQ2);
+
   // Internal links (Phase 5a) — opt-in via profile.authority.enabled, needs history
   if (profile.authority?.enabled) {
     try {
@@ -339,25 +396,31 @@ async function publishToGitHub(req, res, id, profile, body) {
       console.error(`[${id}] Internal linking failed (continuing):`, e.message);
     }
   }
+
   // Resolve language once — used by byline, reviewer, FAQ, and index card
   const lang = article.language || profile.primaryLanguage || "en";
+
   // E-E-A-T: reviewer line (before FAQ, at end of article body)
   if (profile.author?.reviewerName) {
     articleBody = appendReviewerLine(articleBody, profile.author, lang);
   }
+
   // FAQ section (Phase 5b) — visible HTML + FAQPage JSON-LD for AI citations
   if (article.faq && article.faq.length) {
     articleBody = appendFaq(articleBody, article.faq, lang);
   }
+
   // ---- 3) Build slug + dates (must come before byline injection — byline uses dateDisplay) ----
   const slug = slugify(article.title);
   const now  = new Date();
   const dateIso     = now.toISOString();
   const dateDisplay = formatDateHu(now, lang);
+
   // E-E-A-T: byline block (prepended to top of article content)
   if (profile.author?.name) {
     articleBody = prependByline(articleBody, profile.author, dateDisplay);
   }
+
   // ---- 4) Read the post template from the repo ----
   const templatePath = "blog/post-template.html";
   const templateFile = await ghGetFile(gh, templatePath, branch);
@@ -365,8 +428,10 @@ async function publishToGitHub(req, res, id, profile, body) {
     return res.status(400).json({ error: `Could not read ${templatePath} from ${repo}. Check the repo has the ABB blog structure.` });
   }
   const template = b64decode(templateFile.content);
+
   // Strip the leading HTML comment block (the <!-- BLOG POST TEMPLATE ... --> note)
   const cleanTemplate = template.replace(/<!--[\s\S]*?-->\s*/, "");
+
   // ---- TOKEN FILL — dual-emit for hero/body aliases, plus {{TAG}} support.
   //      Templates from different site scaffolds use different token names;
   //      ABB fills every recognized variant with the same value so any naming
@@ -383,15 +448,18 @@ async function publishToGitHub(req, res, id, profile, body) {
     .replace(/\{\{CONTENT\}\}/g,      articleBody)
     .replace(/\{\{BODY_HTML\}\}/g,    articleBody)                          // alias for CONTENT
     .replace(/\{\{TAG\}\}/g,          esc(article.category || ""));
+
   // Safety sweep: strip any unrecognized {{TOKEN}} so it doesn't render as
   // literal text (this was Bug 1 — {{TAG}}/{{COVER_IMAGE}}/{{BODY_HTML}}
   // leaking through into a live post on the Agnes Mortgage first publish).
   postHtml = postHtml.replace(/\{\{[A-Z_][A-Z0-9_]*\}\}/g, "");
+
   // ---- 4b) Tracking injection (gtag + consent + cookie banner) ----
   const gtagId = profile.tracking?.gtagId || "";
   if (gtagId) {
     postHtml = injectTracking(postHtml, gtagId, lang);
   }
+
   // ---- 4c) E-E-A-T Article+Author schema injection has been REMOVED.
   //          Emlektabla's template already emits its own BlogPosting JSON-LD
   //          for the article, and Google prefers one schema block per page.
@@ -402,14 +470,17 @@ async function publishToGitHub(req, res, id, profile, body) {
   //   if (profile.author?.name) {
   //     postHtml = injectAuthorSchema(postHtml, profile.author, article.title, dateIso, heroImg);
   //   }
+
   // ---- 5) Commit the post file ----
   const postPath = `blog/posts/${slug}.html`;
   const existingPost = await ghGetFile(gh, postPath, branch); // may already exist → update
+
   await ghPutFile(gh, postPath, branch,
     `Add blog post: ${article.title}`,
     b64encode(postHtml),
     existingPost?.sha
   );
+
   // ---- 6) Inject a card into blog/index.html ----
   let cardInjected = false;
   try {
@@ -434,12 +505,14 @@ async function publishToGitHub(req, res, id, profile, body) {
   } catch (e) {
     console.error("Index card injection failed (post still committed):", e.message);
   }
+
   // ── SIMILARITY GUARD: record this post's fingerprint for future checks ──
   if (dupCheck.draftShingles && dupCheck.draftShingles.length) {
     await recordPost({
       tenant: id, postId: slug, draftShingles: dupCheck.draftShingles, kvGet, kvSet,
     }).catch(e => console.error(`[${id}] Shingle record failed (non-critical):`, e.message));
   }
+
   // ---- 7) Log to tenant history ----
   const postUrl = `${(profile.siteUrl || "").replace(/\/+$/, "")}/blog/posts/${slug}`;
   await addHistory(id, {
@@ -452,6 +525,7 @@ async function publishToGitHub(req, res, id, profile, body) {
     archetype:    article.archetype || null,
     published_at: dateIso,
   });
+
   return res.status(200).json({
     ok: true, id,
     post: {
@@ -465,7 +539,246 @@ async function publishToGitHub(req, res, id, profile, body) {
     },
   });
 }
+
+// =============================================================================
+//  DELETE POST  (operator action — dashboard 🗑 button)
+// -----------------------------------------------------------------------------
+//  POST /api/app/publish { id, action:"delete-post", url }
+//
+//  Removes a published post everywhere ABB knows about it:
+//    1. blog/posts/{slug}.html  → deleted from the tenant repo (GitHub commit)
+//    2. blog/index.html         → its <article> card removed (GitHub commit)
+//    3. tenant history in KV    → the entry (or entries) with that url dropped
+//    4. audit record written to abb:t:{id}:deleted:{slug}
+//
+//  DESIGN NOTES
+//  • github-static only. There is no live WordPress tenant, and WP deletion is
+//    a different API surface (DELETE /wp/v2/posts/{id}); adding it untested
+//    would be worse than a clear error.
+//  • Partial failure is tolerated and reported rather than aborted. A post
+//    whose file is already gone but whose history entry lingers is exactly the
+//    case an operator needs to clean up, so a 404 on the file is a warning,
+//    not a hard stop.
+//  • The similarity-guard fingerprint is deliberately NOT removed. Deleting a
+//    post does not mean the operator wants ABB to regenerate the same article;
+//    resetting the guard is a separate, explicit action.
+//  • Marker-agnostic: card removal understands both the hyphen convention
+//    (BLOG-LIST-START/END, used by Agnes and emlektabla) and the underscore
+//    convention (BLOG_CARDS_START/END, used by Campoverde's build-sitemap.js).
+// =============================================================================
+
+async function deletePost(res, id, profile, body) {
+  if (profile.integration?.type !== "github-static") {
+    return res.status(400).json({
+      error: "Deleting posts is only supported for github-static tenants.",
+    });
+  }
+
+  const rawUrl = (body.url || "").trim();
+  if (!rawUrl) return res.status(400).json({ error: "Missing 'url' of the post to delete." });
+
+  const slug = slugFromUrl(rawUrl);
+  if (!slug) return res.status(400).json({ error: `Could not derive a post slug from "${rawUrl}".` });
+
+  const repo   = await getSecret(id, "github_repo");
+  const branch = (await getSecret(id, "github_branch")) || "main";
+  const token  = await getSecret(id, "github_token");
+
+  if (!repo || !token) {
+    return res.status(400).json({ error: "GitHub not connected. Add repo + token in the wizard." });
+  }
+
+  const gh = {
+    token,
+    api: `https://api.github.com/repos/${repo}/contents`,
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "AIBlogBuilder/2.0",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  };
+
+  const warnings = [];
+
+  // ---- 1) Find the history entry (for the audit record + a nicer commit message) ----
+  let historyEntry = null;
+  let history = [];
+  try {
+    history = await getHistory(id);
+    historyEntry = history.find(h => h && h.url && slugFromUrl(h.url) === slug) || null;
+  } catch (e) {
+    warnings.push("Could not read history: " + e.message);
+  }
+
+  const postTitle = (historyEntry && (historyEntry.title || historyEntry.topic)) || slug;
+
+  // ---- 2) Delete the post file from the repo ----
+  let fileDeleted = false;
+  const postPath = `blog/posts/${slug}.html`;
+  try {
+    const existing = await ghGetFile(gh, postPath, branch);
+    if (!existing) {
+      warnings.push(`${postPath} was not in the repo (already deleted?).`);
+    } else {
+      await ghDeleteFile(gh, postPath, branch, `Delete blog post: ${postTitle}`, existing.sha);
+      fileDeleted = true;
+    }
+  } catch (e) {
+    warnings.push("Post file delete failed: " + e.message);
+  }
+
+  // ---- 3) Remove the card from blog/index.html ----
+  let cardRemoved = false;
+  try {
+    const indexPath = "blog/index.html";
+    const indexFile = await ghGetFile(gh, indexPath, branch);
+    if (!indexFile) {
+      warnings.push("blog/index.html not found — no card to remove.");
+    } else {
+      const indexHtml = b64decode(indexFile.content);
+      const result = removeCardBySlug(indexHtml, slug);
+      if (result.removed) {
+        await ghPutFile(gh, indexPath, branch,
+          `Remove "${postTitle}" from blog index`,
+          b64encode(result.html),
+          indexFile.sha
+        );
+        cardRemoved = true;
+      } else {
+        warnings.push("No matching card found in blog/index.html (nothing to remove).");
+      }
+    }
+  } catch (e) {
+    warnings.push("Card removal failed: " + e.message);
+  }
+
+  // ---- 4) Drop the entry (or entries) from tenant history ----
+  let historyRemoved = 0;
+  try {
+    const before = history.length;
+    const kept = history.filter(h => !(h && h.url && slugFromUrl(h.url) === slug));
+    historyRemoved = before - kept.length;
+    if (historyRemoved > 0) await saveHistory(id, kept);
+  } catch (e) {
+    warnings.push("History update failed: " + e.message);
+  }
+
+  // ---- 5) Audit record (non-critical) ----
+  try {
+    await setRaw(`t:${id}:deleted:${slug}`, {
+      slug,
+      title: postTitle,
+      url: rawUrl,
+      deletedAt: new Date().toISOString(),
+      fileDeleted,
+      cardRemoved,
+      entry: historyEntry || null,
+    });
+  } catch (e) {
+    warnings.push("Audit record failed: " + e.message);
+  }
+
+  return res.status(200).json({
+    ok: true,
+    id,
+    slug,
+    title: postTitle,
+    fileDeleted,
+    cardRemoved,
+    historyRemoved,
+    warnings,
+  });
+}
+
+// Derive a post slug from a full URL, a path, or a bare slug.
+// "https://site.com/blog/posts/my-post"      → "my-post"
+// "https://site.com/blog/posts/my-post.html" → "my-post"
+// "my-post"                                  → "my-post"
+function slugFromUrl(u) {
+  let s = String(u || "").trim();
+  if (!s) return "";
+  // A bare slug has no path separator — "https://my-post" would parse as a
+  // hostname and yield an empty pathname, so only URL-parse when there's a "/".
+  if (s.includes("/")) {
+    try {
+      const withProto = s.startsWith("http") ? s : "https://" + s;
+      s = new URL(withProto).pathname;
+    } catch {
+      // not a URL — fall through and treat it as a path
+    }
+  }
+  s = s.split("?")[0].split("#")[0];
+  const last = s.split("/").filter(Boolean).pop() || "";
+  return last.replace(/\.html?$/i, "");
+}
+
+// Remove the <article> card whose markup references `slug` from blog/index.html.
+//
+// Scoped to the blog-list region when markers are present (both conventions
+// supported); falls back to scanning the whole document if neither pair is
+// found. The slug match is boundary-guarded so deleting "test-post" can never
+// take out "test-post-2".
+function removeCardBySlug(html, slug) {
+  const MARKER_PAIRS = [
+    ["<!-- BLOG-LIST-START -->",  "<!-- BLOG-LIST-END -->"],
+    ["<!-- BLOG_CARDS_START -->", "<!-- BLOG_CARDS_END -->"],
+  ];
+
+  let start = 0, end = html.length;
+  for (const [s, e] of MARKER_PAIRS) {
+    const si = html.indexOf(s);
+    const ei = html.indexOf(e);
+    if (si !== -1 && ei !== -1 && ei > si) { start = si + s.length; end = ei; break; }
+  }
+
+  const region = html.slice(start, end);
+  const slugRe = new RegExp(escapeRegex(slug) + "(?![A-Za-z0-9_-])");
+
+  const blocks = findArticleBlocks(region);
+  const hit = blocks.find(b => slugRe.test(region.slice(b.from, b.to)));
+  if (!hit) return { html, removed: false };
+
+  // Swallow trailing whitespace so the index doesn't accumulate blank lines
+  let to = hit.to;
+  while (to < region.length && /\s/.test(region[to])) to++;
+
+  const newRegion = region.slice(0, hit.from) + region.slice(to);
+  return { html: html.slice(0, start) + newRegion + html.slice(end), removed: true };
+}
+
+// Find every top-level <article>…</article> span in a fragment, nesting-aware.
+// Returns [{ from, to }] with `to` exclusive, in document order.
+function findArticleBlocks(s) {
+  const out = [];
+  const openRe = /<article\b/gi;
+  let m;
+  while ((m = openRe.exec(s)) !== null) {
+    const from = m.index;
+    const tagRe = /<(\/?)article\b[^>]*>/gi;
+    tagRe.lastIndex = from;
+    let depth = 0, to = -1, t;
+    while ((t = tagRe.exec(s)) !== null) {
+      if (t[1] === "/") {
+        depth--;
+        if (depth <= 0) { to = t.index + t[0].length; break; }
+      } else {
+        depth++;
+      }
+    }
+    if (to === -1) break;          // unbalanced markup — stop rather than guess
+    out.push({ from, to });
+    openRe.lastIndex = to;
+  }
+  return out;
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // ---- GitHub Contents API helpers ----
+
 async function ghGetFile(gh, path, branch) {
   const r = await fetch(`${gh.api}/${encodeURIComponent(path).replace(/%2F/g, "/")}?ref=${encodeURIComponent(branch)}`, {
     headers: gh.headers,
@@ -474,6 +787,7 @@ async function ghGetFile(gh, path, branch) {
   if (!r.ok) throw new Error(`GitHub GET ${path} failed: ${r.status} ${(await r.text()).slice(0, 200)}`);
   return await r.json();
 }
+
 async function ghPutFile(gh, path, branch, message, contentB64, sha) {
   const payload = { message, content: contentB64, branch };
   if (sha) payload.sha = sha; // required to update an existing file
@@ -485,6 +799,19 @@ async function ghPutFile(gh, path, branch, message, contentB64, sha) {
   if (!r.ok) throw new Error(`GitHub PUT ${path} failed: ${r.status} ${(await r.text()).slice(0, 300)}`);
   return await r.json();
 }
+
+// DELETE requires the blob sha of the file being removed — same contract as PUT.
+async function ghDeleteFile(gh, path, branch, message, sha) {
+  if (!sha) throw new Error(`GitHub DELETE ${path}: missing sha.`);
+  const r = await fetch(`${gh.api}/${encodeURIComponent(path).replace(/%2F/g, "/")}`, {
+    method: "DELETE",
+    headers: { ...gh.headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ message, sha, branch }),
+  });
+  if (!r.ok) throw new Error(`GitHub DELETE ${path} failed: ${r.status} ${(await r.text()).slice(0, 300)}`);
+  return await r.json();
+}
+
 // =============================================================================
 //  CARD INJECTION — ADAPTIVE (Plan A → B → C cascade)
 // =============================================================================
@@ -500,19 +827,24 @@ async function ghPutFile(gh, path, branch, message, contentB64, sha) {
 //   4. If no article exists, strip empty-state markup and insert the card at
 //      the end of the region
 // -----------------------------------------------------------------------------
+
 function injectCard(indexHtml, p, profile, lang) {
   const startMark = "<!-- BLOG-LIST-START -->";
   const endMark   = "<!-- BLOG-LIST-END -->";
   const si = indexHtml.indexOf(startMark);
   const ei = indexHtml.indexOf(endMark);
   if (si === -1 || ei === -1 || ei < si) return indexHtml; // markers missing → leave untouched
+
   const before = indexHtml.slice(0, si + startMark.length);
   let   middle = indexHtml.slice(si + startMark.length, ei);
   const after  = indexHtml.slice(ei);
+
   const readMore = READ_MORE_LABELS[lang] || READ_MORE_LABELS.en;
   const cardHtml = buildCardHtml(p, profile, middle, readMore);
+
   // Does the region already contain a real card?
   const articleMatch = middle.match(/<article\b/i);
+
   if (articleMatch) {
     // Insert the new card just before the first existing article — this places
     // it inside whatever wrapper (<div class="post-grid">, etc.) contains the
@@ -525,6 +857,7 @@ function injectCard(indexHtml, p, profile, lang) {
     // <p>/<div> saying "no posts yet") and insert the card at the end.
     middle = middle.replace(/<div class="empty-state"[\s\S]*?<\/div>\s*/gi, "");
     middle = middle.replace(/<div[^>]*id=["']empty-state["'][^>]*>[\s\S]*?<\/div>\s*/gi, "");
+
     // Insert card. If there's a grid wrapper div waiting empty, insert inside
     // it; otherwise just append to the region.
     const wrapperMatch = middle.match(/(<div\b[^>]*class="[^"]*(?:post-grid|blog-grid|card-grid|grid)[^"]*"[^>]*>)([\s\S]*?)(<\/div>)\s*$/i);
@@ -534,8 +867,10 @@ function injectCard(indexHtml, p, profile, lang) {
       middle = middle + "\n" + cardHtml + "\n";
     }
   }
+
   return before + middle + after;
 }
+
 // Build the card HTML — Plan A (profile config) → Plan B (sniff) → Plan C (default).
 function buildCardHtml(p, profile, existingMiddle, readMore) {
   const vars = {
@@ -547,17 +882,20 @@ function buildCardHtml(p, profile, existingMiddle, readMore) {
     EXCERPT:      p.excerpt,
     READ_MORE:    readMore,
   };
+
   // Plan A: tenant-configured template string
   const tpl = profile?.blog?.cardTemplate;
   if (tpl && typeof tpl === "string" && tpl.trim()) {
     return fillCardTemplate(tpl, vars);
   }
+
   // Plan B: sniff the first existing <article> in the region and clone its
   // structure, so ABB inherits whatever classes the site's CSS actually styles
   const sniffed = sniffCardTemplate(existingMiddle);
   if (sniffed) {
     return fillCardTemplate(sniffed, vars);
   }
+
   // Plan C: default matching the website-builder scaffold (.card / .blog-grid).
   // Uses generic .card / .card-img / .card-body / .card-link classes that
   // agnes-mortgage-style CSS knows about out of the box.
@@ -574,6 +912,7 @@ function buildCardHtml(p, profile, existingMiddle, readMore) {
       </div>
     </article>`;
 }
+
 function fillCardTemplate(tpl, vars) {
   return tpl
     .replace(/\{\{URL\}\}/g,          esc(vars.URL))
@@ -584,6 +923,7 @@ function fillCardTemplate(tpl, vars) {
     .replace(/\{\{EXCERPT\}\}/g,      esc(vars.EXCERPT))
     .replace(/\{\{READ_MORE\}\}/g,    esc(vars.READ_MORE));
 }
+
 // Sniff the first existing <article>...</article> block from the current
 // blog index region and turn it into a template with {{URL}}, {{HERO}},
 // {{TITLE}}, {{DATE_ISO}}, {{DATE_DISPLAY}}, {{EXCERPT}}, {{READ_MORE}}
@@ -597,9 +937,11 @@ function sniffCardTemplate(middle) {
   const m = middle.match(/<article\b[\s\S]*?<\/article>/i);
   if (!m) return null;
   let html = m[0];
+
   // Replace all href="..." with {{URL}} (there are typically 2-3 links per card,
   // all pointing to the same post — anchor image, title link, read-more link)
   html = html.replace(/\bhref="[^"]*"/g, `href="{{URL}}"`);
+
   // Replace <img> src and alt
   html = html.replace(/<img\b[^>]*>/i, (imgTag) => {
     let out = imgTag;
@@ -615,11 +957,13 @@ function sniffCardTemplate(middle) {
     }
     return out;
   });
+
   // Replace <time datetime="...">...</time>
   html = html.replace(
     /<time\b[^>]*>[\s\S]*?<\/time>/i,
     `<time datetime="{{DATE_ISO}}">{{DATE_DISPLAY}}</time>`
   );
+
   // Replace the title heading (first <h1>-<h4>) — if it wraps an <a>, keep
   // the anchor and just replace its text; otherwise replace the heading's text.
   html = html.replace(/<(h[1-4])\b([^>]*)>([\s\S]*?)<\/\1>/i, (full, tag, attrs, inner) => {
@@ -629,8 +973,10 @@ function sniffCardTemplate(middle) {
     }
     return `<${tag}${attrs}>{{TITLE}}</${tag}>`;
   });
+
   // Replace the FIRST <p> content with {{EXCERPT}} (the excerpt/summary)
   html = html.replace(/<p\b([^>]*)>[\s\S]*?<\/p>/i, `<p$1>{{EXCERPT}}</p>`);
+
   // Replace read-more link text. Try patterns in order of specificity:
   //   (a) an <a> with a class containing "link" or "read" or "more" (matches
   //       .card-link, .read-more, .post-link, etc.)
@@ -643,20 +989,26 @@ function sniffCardTemplate(middle) {
   if (readMoreReplaced !== html) {
     html = readMoreReplaced;
   }
+
   return html;
 }
+
 // =============================================================================
 //  FAQ SECTION (Phase 5b)
 // =============================================================================
+
 function appendFaq(body, faqItems, lang) {
   if (!faqItems || !faqItems.length) return body;
+
   const heading = FAQ_HEADINGS[lang] || FAQ_HEADINGS.en;
+
   // Visible HTML
   let html = `\n<section class="faq-section">\n<h2>${esc(heading)}</h2>\n`;
   for (const item of faqItems) {
     html += `<div class="faq-item">\n<h3>${esc(item.question)}</h3>\n<p>${esc(item.answer)}</p>\n</div>\n`;
   }
   html += `</section>\n`;
+
   // FAQPage JSON-LD (Google/AI structured data)
   const faqLd = {
     "@context": "https://schema.org",
@@ -671,20 +1023,26 @@ function appendFaq(body, faqItems, lang) {
     })),
   };
   html += `<script type="application/ld+json">${JSON.stringify(faqLd)}</script>\n`;
+
   return body + html;
 }
+
 // =============================================================================
 //  INTERNAL LINKING (Phase 5a)
 // =============================================================================
+
 async function addInternalLinks(body, history, currentTitle) {
   const pool = (history || []).filter(h => h.url && h.title && h.title !== currentTitle);
   if (pool.length < 3) return body; // not enough to link to yet
   if (!process.env.ANTHROPIC_API_KEY) return body;
+
   // Build the candidate list (cap at 40 most recent to keep prompt lean)
   const candidates = pool.slice(0, 40).map((h, i) => ({
     n: i + 1, title: h.title, url: h.url,
   }));
+
   const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
+
   const tool = {
     name: "suggest_links",
     description: "Suggest 2-3 internal links from the new article to prior posts.",
@@ -706,21 +1064,28 @@ async function addInternalLinks(body, history, currentTitle) {
       required: ["links"],
     },
   };
+
   // Strip HTML tags to give Claude clean text (it still returns phrases that exist in body)
   const plainText = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 6000);
   const list = candidates.map(c => `${c.n}. ${c.title}`).join("\n");
+
   const system = `You add internal links between blog posts on the same website. You will receive a NEW article and a list of PRIOR posts. Choose 2-3 prior posts that are genuinely topically related to the new article. For each, pick a short exact phrase (2-5 words) from the new article that would make a natural, relevant anchor for a link to that prior post.
+
 RULES:
 - The anchorPhrase MUST appear word-for-word in the new article text.
 - Choose phrases that are topically relevant to the post being linked (not random words).
 - Do NOT link the title. Pick phrases from the body.
 - Only suggest a link if it's genuinely helpful to the reader. 2-3 links max. Fewer is fine.
 - Each phrase must be different and link to a different prior post.`;
+
   const userMsg = `NEW ARTICLE (plain text):
 ${plainText}
+
 PRIOR POSTS (pick 2-3 relevant ones to link to):
 ${list}
+
 Call suggest_links.`;
+
   let suggestions = [];
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -744,6 +1109,7 @@ Call suggest_links.`;
     console.error("Internal link generation failed:", e.message);
     return body; // fail safe
   }
+
   // Apply the links
   let linked = 0;
   for (const s of suggestions) {
@@ -754,20 +1120,25 @@ Call suggest_links.`;
     const linkResult = linkPhrase(body, s.anchorPhrase, href);
     if (linkResult.linked) { body = linkResult.body; linked++; }
   }
+
   return body;
 }
+
 // Insert a link around the FIRST visible-text occurrence of `phrase`.
 // Skips occurrences inside a tag or already inside an <a>.
 function linkPhrase(body, phrase, href) {
   if (!phrase || !href) return { body, linked: false };
   const idx = body.indexOf(phrase);
   if (idx === -1) return { body, linked: false };
+
   const before = body.slice(0, idx);
   if (before.lastIndexOf("<") > before.lastIndexOf(">")) return { body, linked: false }; // inside a tag
   if (before.lastIndexOf("<a ") > before.lastIndexOf("</a>")) return { body, linked: false }; // inside a link
+
   const link = `<a href="${esc(href)}">${phrase}</a>`;
   return { body: body.slice(0, idx) + link + body.slice(idx + phrase.length), linked: true };
 }
+
 // Full URL (or domain/path) → path only. "emlektabla.net/blog/posts/x" → "/blog/posts/x"
 function urlToPath(url) {
   try {
@@ -775,12 +1146,15 @@ function urlToPath(url) {
     return new URL(withProto).pathname;
   } catch { return url; }
 }
+
 // Inject inline images into the article body HTML.
 function injectInlineImages(body, img1, img2, alt1, alt2) {
   const hasMarker1 = body.includes("{{INLINE_IMG_1}}");
   const hasMarker2 = body.includes("{{INLINE_IMG_2}}");
+
   const tag1 = img1 ? `<img src="${esc(img1)}" alt="${esc(alt1 || "")}" loading="lazy">` : "";
   const tag2 = img2 ? `<img src="${esc(img2)}" alt="${esc(alt2 || "")}" loading="lazy">` : "";
+
   if (hasMarker1 || hasMarker2) {
     body = body.replace("{{INLINE_IMG_1}}", tag1);
     body = body.replace("{{INLINE_IMG_2}}", tag2);
@@ -802,6 +1176,7 @@ function injectInlineImages(body, img1, img2, alt1, alt2) {
   }
   return body;
 }
+
 // =============================================================================
 //  TRACKING INJECTION (gtag + Consent Mode v2 + cookie banner)
 // =============================================================================
@@ -812,6 +1187,7 @@ function injectInlineImages(body, img1, img2, alt1, alt2) {
 // injection is skipped (idempotent — won't conflict with site-level build
 // scripts like build-sitemap.js that also inject gtag).
 // -----------------------------------------------------------------------------
+
 const COOKIE_BANNER_TEXT = {
   hu: { text: "Ez a weboldal sütiket használ a forgalom mérésére és a hirdetések optimalizálására.", accept: "Elfogadom", decline: "Elutasítom" },
   en: { text: "This website uses cookies to measure traffic and optimize ads.", accept: "Accept", decline: "Decline" },
@@ -823,6 +1199,7 @@ const COOKIE_BANNER_TEXT = {
   nl: { text: "Deze website gebruikt cookies om verkeer te meten en advertenties te optimaliseren.", accept: "Accepteren", decline: "Weigeren" },
   pl: { text: "Ta strona używa plików cookie do mierzenia ruchu i optymalizacji reklam.", accept: "Akceptuję", decline: "Odrzucam" },
 };
+
 // =============================================================================
 //  LANGUAGE MAPS — visible strings ABB writes into published HTML
 // =============================================================================
@@ -830,6 +1207,7 @@ const COOKIE_BANNER_TEXT = {
 // ("Tovább olvasom"), and the FAQ section heading was hardcoded Hungarian
 // ("Gyakran ismételt kérdések"). Now driven by profile.primaryLanguage
 // with an English fallback (same pattern as REVIEWER_LABELS and COOKIE_BANNER_TEXT).
+
 const READ_MORE_LABELS = {
   en: "Read more →",
   hu: "Tovább olvasom →",
@@ -850,6 +1228,7 @@ const READ_MORE_LABELS = {
   ar: "اقرأ المزيد ←",
   hi: "और पढ़ें →",
 };
+
 const FAQ_HEADINGS = {
   en: "Frequently asked questions",
   hu: "Gyakran ismételt kérdések",
@@ -870,13 +1249,17 @@ const FAQ_HEADINGS = {
   ar: "الأسئلة الشائعة",
   hi: "अक्सर पूछे जाने वाले प्रश्न",
 };
+
 function injectTracking(html, gtagId, lang) {
   // Sanitize — only allow alphanumeric, hyphen, underscore
   const safeId = String(gtagId).replace(/[^A-Za-z0-9\-_]/g, "");
   if (!safeId) return html;
+
   // Idempotent: skip if gtag is already present (e.g. from build-sitemap.js)
   if (html.includes("googletagmanager.com/gtag/js")) return html;
+
   const b = COOKIE_BANNER_TEXT[lang] || COOKIE_BANNER_TEXT.en;
+
   const headSnippet = [
     "<!-- Google tag (gtag.js) — injected by ABB -->",
     "<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}",
@@ -884,6 +1267,7 @@ function injectTracking(html, gtagId, lang) {
     `<script async src="https://www.googletagmanager.com/gtag/js?id=${safeId}"></script>`,
     `<script>gtag('js',new Date());gtag('config','${safeId}');</script>`,
   ].join("\n");
+
   const bannerSnippet = [
     "<!-- Cookie consent banner — injected by ABB -->",
     '<div id="abb-cookie-banner" style="position:fixed;bottom:0;left:0;right:0;background:#1e293b;color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:14px;z-index:9999;font-family:system-ui,-apple-system,sans-serif">',
@@ -898,6 +1282,7 @@ function injectTracking(html, gtagId, lang) {
     "(function(){var c=localStorage.getItem('cookie_consent');if(c==='granted')abbGrant();else if(c==='denied')document.getElementById('abb-cookie-banner').style.display='none'})()",
     "</script>",
   ].join("\n");
+
   // Inject before </head> and before </body>
   if (html.includes("</head>")) {
     html = html.replace("</head>", headSnippet + "\n</head>");
@@ -907,6 +1292,7 @@ function injectTracking(html, gtagId, lang) {
   }
   return html;
 }
+
 // =============================================================================
 //  E-E-A-T SCAFFOLDING (byline, reviewer, Article schema)
 // =============================================================================
@@ -915,6 +1301,7 @@ function injectTracking(html, gtagId, lang) {
 // profile.author. Byline goes at top of article content, reviewer line at
 // bottom (before FAQ), Article + Person JSON-LD in <head>.
 // -----------------------------------------------------------------------------
+
 const REVIEWER_LABELS = {
   hu: "Szakértői ellenőrzés",
   en: "Reviewed by",
@@ -926,14 +1313,18 @@ const REVIEWER_LABELS = {
   nl: "Beoordeeld door",
   pl: "Zweryfikowane przez",
 };
+
 function prependByline(body, author, dateDisplay) {
   if (!author || !author.name) return body;
+
   const photoHtml = author.photoUrl
     ? `<img src="${esc(author.photoUrl)}" alt="${esc(author.name)}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0">`
     : "";
+
   const titleHtml = author.title
     ? `<span style="display:block;font-size:13px;color:#64748b">${esc(author.title)}</span>`
     : "";
+
   const byline = [
     '<div class="author-byline" style="display:flex;align-items:center;gap:14px;padding:16px 0;margin-bottom:20px;border-bottom:1px solid #e2e8f0;font-family:system-ui,-apple-system,sans-serif">',
     photoHtml,
@@ -944,8 +1335,10 @@ function prependByline(body, author, dateDisplay) {
     '</div>',
     '</div>',
   ].join("\n");
+
   return byline + "\n" + body;
 }
+
 function appendReviewerLine(body, author, lang) {
   if (!author || !author.reviewerName) return body;
   const label = REVIEWER_LABELS[lang] || REVIEWER_LABELS.en;
@@ -953,8 +1346,10 @@ function appendReviewerLine(body, author, lang) {
   const html = `\n<p class="reviewer-line" style="font-size:13px;color:#64748b;margin-top:28px;padding-top:14px;border-top:1px solid #e2e8f0;font-style:italic;font-family:system-ui,-apple-system,sans-serif">${esc(label)}: <strong>${esc(author.reviewerName)}</strong>${titlePart}</p>\n`;
   return body + html;
 }
+
 function injectAuthorSchema(html, author, articleTitle, dateIso, heroImg) {
   if (!author || !author.name) return html;
+
   const authorObj = {
     "@type": "Person",
     "name": author.name,
@@ -962,6 +1357,7 @@ function injectAuthorSchema(html, author, articleTitle, dateIso, heroImg) {
   if (author.title) authorObj.jobTitle = author.title;
   if (author.bio) authorObj.description = author.bio;
   if (author.photoUrl) authorObj.image = author.photoUrl;
+
   const schema = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -970,18 +1366,22 @@ function injectAuthorSchema(html, author, articleTitle, dateIso, heroImg) {
     "author": authorObj,
   };
   if (heroImg) schema.image = heroImg;
+
   if (author.reviewerName) {
     const reviewerObj = { "@type": "Person", "name": author.reviewerName };
     if (author.reviewerTitle) reviewerObj.jobTitle = author.reviewerTitle;
     schema.reviewedBy = reviewerObj;
   }
+
   const snippet = `\n<!-- Article + Author schema — injected by ABB -->\n<script type="application/ld+json">${JSON.stringify(schema)}</script>\n`;
   if (html.includes("</head>")) {
     html = html.replace("</head>", snippet + "</head>");
   }
   return html;
 }
+
 // ---- Text/encoding utilities ----
+
 function slugify(title) {
   const map = { á:"a",é:"e",í:"i",ó:"o",ö:"o",ő:"o",ú:"u",ü:"u",ű:"u",
                 Á:"a",É:"e",Í:"i",Ó:"o",Ö:"o",Ő:"o",Ú:"u",Ü:"u",Ű:"u",
@@ -994,19 +1394,23 @@ function slugify(title) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || `post-${Date.now().toString(36)}`;
 }
+
 function formatDateHu(d, lang) {
   try {
     const locale = lang === "hu" ? "hu-HU" : (lang || "en");
     return new Intl.DateTimeFormat(locale, { year: "numeric", month: "long", day: "numeric" }).format(d);
   } catch { return d.toISOString().slice(0, 10); }
 }
+
 function b64encode(str) { return Buffer.from(str, "utf-8").toString("base64"); }
 function b64decode(b64) { return Buffer.from(b64, "base64").toString("utf-8"); }
+
 function esc(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
 async function pexelsImageUrl(query) {
   const r = await fetch(
     `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=5&orientation=landscape`,
@@ -1019,6 +1423,7 @@ async function pexelsImageUrl(query) {
   const photo = photos[Math.floor(Math.random() * photos.length)];
   return photo.src?.large2x || photo.src?.large || photo.src?.original || "";
 }
+
 // ---------------------------------------------------------------------------
 //  Pexels → download → upload to WP Media Library
 // ---------------------------------------------------------------------------
@@ -1031,12 +1436,15 @@ async function uploadHeroImage(wpBase, wpHeaders, query, altText) {
   const pexData = await pexRes.json();
   const photos = pexData.photos || [];
   if (!photos.length) throw new Error("No Pexels images found for: " + query);
+
   const photo = photos[Math.floor(Math.random() * photos.length)];
   const imgUrl = photo.src?.large2x || photo.src?.large || photo.src?.original;
   if (!imgUrl) throw new Error("No usable image URL");
+
   const imgRes = await fetch(imgUrl);
   if (!imgRes.ok) throw new Error(`Image download failed: ${imgRes.status}`);
   const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+
   const filename = `abb-hero-${Date.now()}.jpg`;
   const uploadRes = await fetch(`${wpBase}/wp-json/wp/v2/media`, {
     method: "POST",
@@ -1047,10 +1455,13 @@ async function uploadHeroImage(wpBase, wpHeaders, query, altText) {
     },
     body: imgBuffer,
   });
+
   if (!uploadRes.ok) {
     throw new Error(`WP media upload failed: ${uploadRes.status} ${(await uploadRes.text()).slice(0, 200)}`);
   }
+
   const media = await uploadRes.json();
+
   if (media.id && altText) {
     await fetch(`${wpBase}/wp-json/wp/v2/media/${media.id}`, {
       method: "POST",
@@ -1058,8 +1469,10 @@ async function uploadHeroImage(wpBase, wpHeaders, query, altText) {
       body: JSON.stringify({ alt_text: altText.slice(0, 125) }),
     }).catch(() => {}); // non-critical
   }
+
   return media.id;
 }
+
 // ---------------------------------------------------------------------------
 //  Find existing WP category by name, or create it
 // ---------------------------------------------------------------------------
@@ -1076,6 +1489,7 @@ async function findOrCreateCategory(wpBase, wpHeaders, categoryName) {
     );
     if (match) return match.id;
   }
+
   const createRes = await fetch(`${wpBase}/wp-json/wp/v2/categories`, {
     method: "POST",
     headers: { ...wpHeaders, "Content-Type": "application/json" },
