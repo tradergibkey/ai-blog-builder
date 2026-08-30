@@ -52,6 +52,7 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .btn-outline{background:var(--surface);color:var(--ink);border:1.5px solid var(--line)}
 .btn-outline:hover{border-color:var(--violet);color:var(--violet)}
 .btn-sm{padding:9px 16px;font-size:13.5px;border-radius:11px}
+.btn:disabled{opacity:.55;cursor:not-allowed;transform:none;filter:none}
 
 /* Gate */
 .gate{max-width:460px;margin:12vh auto 0;text-align:center;padding:0 20px}
@@ -116,19 +117,35 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .detail-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:22px}
 .detail-head h2{font-size:23px}
 
+/* Publish now */
+.pubnow-row{display:flex;gap:10px;flex-wrap:wrap}
+.pubnow-row input{flex:1;min-width:240px;padding:12px 15px;border:1.5px solid var(--line);border-radius:14px;font-size:14.5px;font-family:var(--font-body);background:var(--surface)}
+.pubnow-row input:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px rgba(199,51,64,.14)}
+.pubnow-row input:disabled{background:var(--bg-alt);color:var(--muted)}
+.pubnow-note{font-size:12.5px;color:var(--muted);margin-top:11px;line-height:1.5}
+.pubnow-status{font-family:var(--font-mono);font-size:12.5px;color:var(--violet);margin-top:12px;font-weight:700;display:none}
+.pubnow-status.show{display:block}
+
 /* Calendar */
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
 .cal .dow{font-family:var(--font-mono);font-size:10px;font-weight:700;color:var(--muted);text-align:center;text-transform:uppercase;letter-spacing:.1em;padding:5px 0}
-.cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:10px;padding:5px 6px;font-size:12px;min-height:48px;background:var(--surface)}
+.cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:10px;padding:5px 6px;font-size:12px;min-height:48px;background:var(--surface);position:relative}
 .cal .day.empty{border:none;background:transparent}
 .cal .day .dn{color:var(--muted);font-size:11px;font-weight:600}
 .cal .day.has{background:var(--grad-soft);border-color:rgba(154,19,60,.35)}
 .cal .day.published{background:var(--ok-bg);border-color:rgba(21,128,61,.4)}
-.cal .day.published:has(a):hover{background:#D4EDDA;cursor:pointer}
+.cal .day.published:has(a):hover{background:#D4EDDA}
 .cal .day.has.published{background:linear-gradient(135deg,var(--ok-bg) 50%,rgba(227,117,53,.12) 50%);border-color:rgba(21,128,61,.4)}
 .cal .day.today{box-shadow:0 0 0 2px var(--violet)}
 .cal .day .topic{font-size:9px;line-height:1.25;color:var(--violet);margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-weight:600}
 .cal .day .plan-time{font-family:var(--font-mono);font-size:9px;font-weight:700;color:var(--orange);margin-top:2px}
+.cal-link{display:block;color:inherit;text-decoration:none;cursor:pointer}
+.cal-link:hover{text-decoration:none}
+.cal-del{position:absolute;top:2px;right:2px;width:19px;height:19px;padding:0;border:0;border-radius:6px;background:rgba(185,28,28,.10);color:var(--err);font-size:10px;line-height:1;cursor:pointer;opacity:0;transition:opacity .12s,background .12s;z-index:2}
+.cal .day:hover .cal-del{opacity:1}
+.cal-del:hover{background:rgba(185,28,28,.22)}
+.cal-del:disabled{opacity:.4;cursor:not-allowed}
+@media(hover:none){.cal-del{opacity:.8}}
 .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .cal-nav button{background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:7px 14px;cursor:pointer;font-weight:700;font-size:14px;color:var(--ink)}
 .cal-nav button:hover{border-color:var(--violet);color:var(--violet)}
@@ -138,9 +155,13 @@ p{margin:0}a{color:var(--violet);text-decoration:none}a:hover{text-decoration:un
 .hist{list-style:none;padding:0;margin:0}
 .hist li{padding:13px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
 .hist li:last-child{border-bottom:none}
-.hist .ht{font-size:14px;font-weight:600}
+.hist .ht{font-size:14px;font-weight:600;flex:1;min-width:0}
 .hist .ht a{color:var(--ink)}.hist .ht a:hover{color:var(--violet);text-decoration:none}
+.hist .hmeta{display:flex;align-items:center;gap:12px;flex-shrink:0}
 .hist .hd{font-family:var(--font-mono);font-size:11.5px;color:var(--muted);white-space:nowrap;padding-top:2px}
+.hist-del{border:1px solid var(--line);background:var(--surface);color:var(--err);border-radius:9px;padding:5px 11px;font-size:12px;font-weight:700;font-family:var(--font-body);cursor:pointer;transition:background .12s,border-color .12s;white-space:nowrap}
+.hist-del:hover{background:var(--err-bg);border-color:var(--err)}
+.hist-del:disabled{opacity:.45;cursor:not-allowed}
 
 .empty{color:var(--muted);font-size:14px;text-align:center;padding:34px}
 .spinner{text-align:center;padding:44px;color:var(--muted)}
@@ -279,8 +300,13 @@ function renderTenants(tenants) {
 // Current detail-view tenant (for inline edits like the Int. links toggle)
 var currentTenantId = null;
 var currentProfile = null;
+var currentQueue = [];      // needed by "Publish now" when no custom topic is typed
+var busyPublishing = false; // guards against a second publish while one is in flight
 
-function showList() { $("listView").style.display="block"; $("detailView").style.display="none"; calRef=null; currentTenantId=null; currentProfile=null; }
+function showList() {
+  $("listView").style.display="block"; $("detailView").style.display="none";
+  calRef=null; currentTenantId=null; currentProfile=null; currentQueue=[];
+}
 
 async function openTenant(encId) {
   var id = decodeURIComponent(encId);
@@ -308,6 +334,8 @@ function renderDetail(id, profile, q) {
   var queue = q.queue || [];
   var history = q.history || [];
   var plan = q.plan;
+  currentQueue = queue;
+
   var intType = (profile.integration && profile.integration.type) || "wordpress";
   var intBadge = intType==="github-static" ? '<span class="badge gh">GitHub</span>' : '<span class="badge wp">WordPress</span>';
   var linking = (profile.authority && profile.authority.enabled) ? "On" : "Off";
@@ -359,6 +387,23 @@ function renderDetail(id, profile, q) {
     html += '<div class="msg info show" style="margin:0 0 22px">' + planParts + '</div>';
   }
 
+  // ── Publish now ──
+  var nextQueued = queue.length ? (queue.find(function(e) { return e.topic; }) || null) : null;
+  var placeholder = nextQueued
+    ? 'Leave empty to publish the next queued topic: "' + String(nextQueued.topic).slice(0, 60) + '"'
+    : 'Type the topic or theme to write about';
+  html += '<div class="panel">' +
+    '<div class="panel-title"><span class="pico">\u26A1</span> Publish now</div>' +
+    '<div class="pubnow-row">' +
+      '<input id="forceTopic" type="text" placeholder="' + escapeHtml(placeholder) + '" onkeydown="if(event.key===\'Enter\'){event.preventDefault();forcePublish();}">' +
+      '<button class="btn btn-primary" id="forcePublishBtn" onclick="forcePublish()">Publish now</button>' +
+    '</div>' +
+    '<p class="pubnow-note">Generates and publishes a post immediately. Takes 2\u20135 minutes \u2014 keep this tab open. ' +
+      'Type a topic to write something specific (the queue is left untouched), or leave it empty to run the next queued topic (which is then removed from the queue). ' +
+      'Either way today\u2019s plan is marked done afterwards so the cron won\u2019t publish a second post today.</p>' +
+    '<div class="pubnow-status" id="pubnowStatus"></div>' +
+  '</div>';
+
   html += '<div class="panel"><div class="panel-title"><span class="pico">\u25A4</span> Content calendar</div><div id="calMount"></div></div>';
 
   html += '<div class="panel"><div class="panel-title"><span class="pico">\u2713</span> Recent posts</div>';
@@ -368,7 +413,11 @@ function renderDetail(id, profile, q) {
       var d = (h.published_at||"").slice(0,10);
       var url = h.url ? (h.url.startsWith("http")?h.url:"https://"+h.url) : null;
       var title = escapeHtml(h.title||h.topic||"Untitled");
-      return '<li><span class="ht">' + (url ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + title + '</a>' : title) + '</span><span class="hd">' + escapeHtml(d) + '</span></li>';
+      var delBtn = url
+        ? '<button class="hist-del" onclick="deletePostUI(\'' + encodeURIComponent(url) + '\',this)" title="Delete this post everywhere">Delete</button>'
+        : '';
+      return '<li><span class="ht">' + (url ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + title + '</a>' : title) + '</span>' +
+             '<span class="hmeta"><span class="hd">' + escapeHtml(d) + '</span>' + delBtn + '</span></li>';
     }).join("") + '</ul>';
   }
   html += '</div>';
@@ -427,6 +476,7 @@ function drawCalendar(byDate, pubDates) {
 
     // Build cell content
     var cellContent = "";
+    var delBtn = "";
 
     // Today's cell: show plan topic + time (not the queue's first item)
     if (ds === todayStr && calPlan && (calPlan.status === "pending" || calPlan.status === "publishing")) {
@@ -438,7 +488,16 @@ function drawCalendar(byDate, pubDates) {
       var pubTopic = getPubTopic(ds);
       if (pubTopic) cellContent += '<div class="topic" style="color:var(--ok)">' + escapeHtml(pubTopic) + '</div>';
       var pubUrl = getPubUrl(ds);
-      if (pubUrl) cellContent = '<a href="' + escapeHtml(pubUrl) + '" target="_blank" rel="noopener" style="display:block;color:inherit;text-decoration:none;height:100%">' + cellContent + '</a>';
+      if (pubUrl) {
+        // Anchor wraps only the text. The delete button is a SIBLING, never a
+        // child of the <a> — a <button> inside an <a> is invalid HTML and
+        // Chrome fires the navigation as well as the click handler.
+        cellContent = '<a class="cal-link" href="' + escapeHtml(pubUrl) + '" target="_blank" rel="noopener">' + cellContent + '</a>';
+        if (ds <= todayStr) {
+          delBtn = '<button class="cal-del" title="Delete this post everywhere" ' +
+                   'onclick="event.preventDefault();event.stopPropagation();deletePostUI(\'' + encodeURIComponent(pubUrl) + '\',this)">\u2715</button>';
+        }
+      }
     } else if (items.length) {
       // Future queued item — show its pre-rolled scheduledTime if present
       var st = items[0].scheduledTime;
@@ -448,7 +507,7 @@ function drawCalendar(byDate, pubDates) {
       cellContent += '<div class="topic">' + escapeHtml(items[0].topic||"") + '</div>';
     }
 
-    html += '<div class="' + cls + '"><div class="dn">' + d + '</div>' + cellContent + '</div>';
+    html += '<div class="' + cls + '">' + delBtn + '<div class="dn">' + d + '</div>' + cellContent + '</div>';
   }
   html += '</div>';
   mount.innerHTML = html;
@@ -499,6 +558,138 @@ function calMove(delta) {
   var pubDates = new Set();
   (calHistory||[]).forEach(function(h) { var d=(h.published_at||"").slice(0,10); if(d) pubDates.add(d); });
   drawCalendar(mount._byDate || {}, pubDates);
+}
+
+/* ─── Publish now ───
+   The backend publish endpoint needs an explicit topic — it does not read the
+   queue itself (only the cron does). So with an empty input we send the first
+   queued topic, then remove that queue item on success, which reproduces
+   exactly what the cron would have done. Either way we clear today's plan so
+   the cron doesn't publish a second post the same day. */
+async function forcePublish() {
+  if (!currentTenantId || busyPublishing) return;
+
+  var input = $("forceTopic");
+  var btn = $("forcePublishBtn");
+  var statusEl = $("pubnowStatus");
+  if (!input || !btn) return;
+
+  var typed = (input.value || "").trim();
+  var queueItem = null;
+  var topic = typed;
+  var category = "";
+
+  if (!topic) {
+    queueItem = currentQueue.find(function(e) { return e && e.topic; }) || null;
+    if (!queueItem) {
+      showToast("Queue is empty \u2014 type a topic first", "err");
+      input.focus();
+      return;
+    }
+    topic = queueItem.topic;
+    category = queueItem.category || "";
+  }
+
+  var confirmed = confirm(
+    (typed ? "Publish a new post on:\n\n\u201C" + topic + "\u201D\n\nThis topic is not in the queue, so nothing is removed from it."
+           : "Publish the next queued topic now:\n\n\u201C" + topic + "\u201D\n\nThis item will be removed from the queue.") +
+    "\n\nGeneration takes 2\u20135 minutes. Keep this tab open."
+  );
+  if (!confirmed) return;
+
+  busyPublishing = true;
+  btn.disabled = true;
+  input.disabled = true;
+  var t0 = Date.now();
+  statusEl.className = "pubnow-status show";
+  var tick = setInterval(function() {
+    var s = Math.round((Date.now() - t0) / 1000);
+    statusEl.textContent = "\u23F3 Generating and publishing\u2026 " + s + "s elapsed \u2014 do not close this tab.";
+  }, 1000);
+  statusEl.textContent = "\u23F3 Generating and publishing\u2026 0s elapsed \u2014 do not close this tab.";
+
+  var r = await api("POST", "/publish", { id: currentTenantId, topic: topic, category: category });
+
+  clearInterval(tick);
+  busyPublishing = false;
+  btn.disabled = false;
+  input.disabled = false;
+
+  if (!(r.ok && r.data && r.data.ok)) {
+    statusEl.className = "pubnow-status";
+    var errMsg = (r.data && (r.data.detail || r.data.error)) ||
+                 (r.status === 504 ? "Timed out after 300s (Vercel limit)" : "Publish failed (" + r.status + ")");
+    showToast(errMsg, "err");
+    alert("Publish failed:\n\n" + errMsg);
+    return;
+  }
+
+  var post = r.data.post || {};
+  var secs = Math.round((Date.now() - t0) / 1000);
+  statusEl.textContent = "\u2705 Published in " + secs + "s: " + (post.title || topic);
+
+  // Housekeeping: drop the consumed queue item, then mark today's plan done.
+  // Both are best-effort — the post is already live either way.
+  if (queueItem && queueItem.id) {
+    await api("POST", "/queue", { id: currentTenantId, action: "remove", itemId: queueItem.id });
+  }
+  await api("POST", "/queue", { id: currentTenantId, action: "clear-plan" });
+
+  showToast("Published: " + (post.title || topic), "ok");
+  input.value = "";
+
+  if (post.url) {
+    if (confirm("Published:\n\n" + (post.title || topic) + "\n\nOpen the post in a new tab?")) {
+      window.open(post.url, "_blank", "noopener");
+    }
+  }
+
+  openTenant(encodeURIComponent(currentTenantId));
+}
+
+/* ─── Delete a published post ───
+   Removes the post file from the repo, its card from blog/index.html, and the
+   entry from ABB history. Irreversible from the dashboard — the file is only
+   recoverable from the repo's git history. */
+async function deletePostUI(encUrl, btnEl) {
+  if (!currentTenantId) return;
+  var url = decodeURIComponent(encUrl);
+
+  var confirmed = confirm(
+    "Delete this post permanently?\n\n" + url + "\n\n" +
+    "This removes:\n" +
+    "\u2022 the post file from the GitHub repo\n" +
+    "\u2022 its card from the blog index\n" +
+    "\u2022 the entry from ABB history\n\n" +
+    "It cannot be undone from the dashboard."
+  );
+  if (!confirmed) return;
+
+  if (btnEl) btnEl.disabled = true;
+
+  var r = await api("POST", "/publish", { id: currentTenantId, action: "delete-post", url: url });
+
+  if (!(r.ok && r.data && r.data.ok)) {
+    if (btnEl) btnEl.disabled = false;
+    var errMsg = (r.data && r.data.error) || ("Delete failed (" + r.status + ")");
+    showToast(errMsg, "err");
+    alert("Delete failed:\n\n" + errMsg);
+    return;
+  }
+
+  var d = r.data;
+  var parts = [];
+  parts.push(d.fileDeleted ? "file deleted" : "file not found");
+  parts.push(d.cardRemoved ? "card removed" : "no card");
+  parts.push(d.historyRemoved ? "history cleaned" : "no history entry");
+  showToast("Deleted \u00B7 " + parts.join(" \u00B7 "), "ok");
+
+  if (d.warnings && d.warnings.length) {
+    alert("Post deleted, with warnings:\n\n\u2022 " + d.warnings.join("\n\u2022 ") +
+          "\n\nNote: the tenant site may serve a cached blog index for a while \u2014 redeploy on Vercel without build cache to see the change immediately.");
+  }
+
+  openTenant(encodeURIComponent(currentTenantId));
 }
 
 /* ─── Int. links toggle ─── */
@@ -637,7 +828,8 @@ async function saveDays() {
     showToast("Publish days saved \u00B7 " + (rd.data.redated || 0) + " items re-dated", "ok");
     // Refresh calendar with the newly-dated queue (no full-page reload).
     // rd.data.queue is the updated queue; re-use current history + plan.
-    renderCalendar(rd.data.queue || [], calHistory, calPlan);
+    currentQueue = rd.data.queue || [];
+    renderCalendar(currentQueue, calHistory, calPlan);
   } else {
     showToast("Days saved, but re-date failed: " + ((rd.data && rd.data.error) || "unknown"), "err");
   }
