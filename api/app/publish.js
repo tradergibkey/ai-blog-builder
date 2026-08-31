@@ -95,10 +95,19 @@ const kvSet = (k, v) => setStr(k.startsWith("abb:") ? k.slice(4) : k, v);
 // ---------------------------------------------------------------------------
 //  Translation configuration (Phase 2)
 // ---------------------------------------------------------------------------
-// Haiku is used for translations — it's ~5× cheaper than Sonnet, more than
-// good enough for prose translation, and its lower latency lets us run 3 langs
-// in parallel comfortably within the 300s function budget.
-const TRANSLATION_MODEL = process.env.CLAUDE_TRANSLATION_MODEL || "claude-haiku-4-5-20251001";
+// Translation models are chosen per target language. Haiku handles Romance/
+// Germanic langs (DE/ES) well — cheap, fast, near-native output. Hungarian is
+// agglutinative with non-European word order and Haiku's first pass reads as
+// word-for-word: Sonnet does noticeably better there and costs pennies more
+// per publish. Env vars can override either — CLAUDE_TRANSLATION_MODEL_HU for
+// the HU model, CLAUDE_TRANSLATION_MODEL for everything else.
+const TRANSLATION_MODEL_DEFAULT = process.env.CLAUDE_TRANSLATION_MODEL || "claude-haiku-4-5-20251001";
+const TRANSLATION_MODEL_BY_LANG = {
+  hu: process.env.CLAUDE_TRANSLATION_MODEL_HU || "claude-sonnet-4-6",
+};
+function modelForLang(lang) {
+  return TRANSLATION_MODEL_BY_LANG[lang] || TRANSLATION_MODEL_DEFAULT;
+}
 const TRANSLATION_TIMEOUT_MS = 180_000; // 3 min per language
 
 // Full language names for the translation prompt. Locale hints included so the
@@ -478,7 +487,8 @@ async function publishToGitHub(req, res, id, profile, body) {
   const translationErrors = [];
   if (targetLangs.length) {
     console.log(`[${id}] Translating "${slug}" to: ${targetLangs.join(", ")}`);
-    const results = await Promise.allSettled(targetLangs.map(l => translateArticle(article, l)));
+    const voice = profile.voice || "";
+    const results = await Promise.allSettled(targetLangs.map(l => translateArticle(article, l, voice)));
     for (let i = 0; i < results.length; i++) {
       const l = targetLangs[i];
       const r = results[i];
@@ -669,9 +679,10 @@ async function publishToGitHub(req, res, id, profile, body) {
 //  language failure never blocks the others.
 // =============================================================================
 
-async function translateArticle(article, targetLang) {
+async function translateArticle(article, targetLang, voice) {
   const targetName = LANG_FULL_NAMES[targetLang];
   if (!targetName) throw new Error(`Unknown target language: ${targetLang}`);
+  const model = modelForLang(targetLang);
 
   const tool = {
     name: "translated_article",
@@ -701,9 +712,18 @@ async function translateArticle(article, targetLang) {
     },
   };
 
-  const system = `You are a professional financial translator working for a UK mortgage broker's blog. Translate content into ${targetName} while preserving all HTML markup exactly.
+  const voiceBlock = voice && voice.trim()
+    ? `\n\nTENANT VOICE (the source article was written to this voice — match its register and personality in ${targetName}):\n${voice.trim()}\n`
+    : "";
 
+  const langNotes = targetLang === "hu"
+    ? "\n- Hungarian is agglutinative and its word order differs from English — do not mirror English syntax. Use natural Hungarian sentence structure, correct case suffixes, and the flow a native Hungarian financial writer would produce. A Hungarian reader must not be able to tell this was translated.\n- Preserve industry terms of art that Hungarian professionals use untranslated (e.g. \"buy-to-let\", \"HMO\"), but translate everything that has a natural Hungarian equivalent (mortgage → jelzáloghitel, remortgage → hitelkiváltás, lender → hitelező, etc.)."
+    : "";
+
+  const system = `You are a professional financial translator working for a UK mortgage broker's blog. Translate content into ${targetName} while preserving all HTML markup exactly.
+${voiceBlock}
 CRITICAL RULES:
+- Translate MEANING, not words. Restructure sentences so they read as if originally written in ${targetName}. A native ${targetName} reader must never be able to tell this is a translation.
 - Preserve every HTML tag, attribute, and inline style exactly as-is
 - Preserve every href="..." URL exactly — only translate the anchor text between <a>...</a>
 - Preserve every img src="..." exactly — translate the alt="..." text
@@ -711,7 +731,7 @@ CRITICAL RULES:
 - Financial and legal terms should use correct UK-context terminology described naturally for a ${targetName}-speaking reader
 - Keep the same tone, register, and paragraph structure as the source
 - Never modify URLs, paths, or file extensions
-- The closing "Working with [brand]" paragraph stays as a paragraph — translate its prose but keep any link paths (like /#contact) unchanged`;
+- The closing "Working with [brand]" paragraph stays as a paragraph — translate its prose but keep any link paths (like /#contact) unchanged${langNotes}`;
 
   const userMsg = `Translate this article to ${targetName}. Call the translated_article tool with the complete translation.
 
@@ -743,7 +763,7 @@ ${JSON.stringify(article.faq || [], null, 2)}`;
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: TRANSLATION_MODEL,
+        model,
         max_tokens: 8000,
         system,
         messages: [{ role: "user", content: userMsg }],
@@ -781,7 +801,7 @@ ${JSON.stringify(article.faq || [], null, 2)}`;
     throw new Error(`Translation to ${targetLang} incomplete (title=${!!translated.title}, body=${!!translated.body}) after ${dtMs}ms.`);
   }
 
-  console.log(`[translate] ${targetLang}: ok in ${dtMs}ms, ${translated.body.length} body chars.`);
+  console.log(`[translate] ${targetLang} (${model}): ok in ${dtMs}ms, ${translated.body.length} body chars.`);
 
   // Preserve every non-translated field from the source; overlay the translated ones.
   return {
@@ -943,7 +963,8 @@ async function retranslatePost(res, id, profile, body) {
   const translationErrors = [];
   if (targetLangs.length) {
     console.log(`[${id}] Retranslating "${slug}" to: ${targetLangs.join(", ")}`);
-    const results = await Promise.allSettled(targetLangs.map(l => translateArticle(article, l)));
+    const voice = profile.voice || "";
+    const results = await Promise.allSettled(targetLangs.map(l => translateArticle(article, l, voice)));
     for (let i = 0; i < results.length; i++) {
       const l = targetLangs[i];
       const r = results[i];
