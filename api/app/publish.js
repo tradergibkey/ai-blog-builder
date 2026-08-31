@@ -44,6 +44,20 @@
 //  its card from blog/index.html, drops the entry from tenant history, and
 //  writes an audit record. See deletePost() at the bottom of this file.
 //
+//  TRANSLATIONS (Phase 2, 2026-08-31): tenants can opt in via profile
+//  { translations: { enabled: true, langs: ["de","es","hu"] } }. After the EN
+//  post is generated, publish.js translates it into each target language via
+//  Haiku (parallel), commits a per-language post file to blog/posts/{lang}/,
+//  injects a card into blog/{lang}/index.html, and writes hreflang alternates
+//  across every version so Google clusters them correctly. Partial failure is
+//  tolerated (EN + successful langs publish; failed langs are logged and a
+//  Telegram alert fires with a retry command).
+//
+//  RETRANSLATE (Phase 2): operator action { action: "retranslate", slug } —
+//  re-runs translations for a previously published post using the snapshot
+//  stored in KV at publish time. Also refreshes the EN post's hreflang set so
+//  the alternate cluster stays consistent after languages are added.
+//
 //  Flow:
 //    1. Read tenant profile (for draft/publish setting)
 //    2. Decrypt credentials
@@ -56,14 +70,16 @@
 //  POST /api/app/publish  { id, topic, category }          → generate + publish
 //  POST /api/app/publish  { id, article: { title, body, excerpt, ... } } → publish only
 //  POST /api/app/publish  { id, action:"delete-post", url } → delete a published post
+//  POST /api/app/publish  { id, action:"retranslate", slug, langs? } → re-translate an existing post
 //
 //  AUTH: x-app-secret (operator only)
-//  ENV:  ABB_APP_SECRET, ANTHROPIC_API_KEY, PEXELS_API_KEY (optional)
+//  ENV:  ABB_APP_SECRET, ANTHROPIC_API_KEY, PEXELS_API_KEY (optional),
+//        TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (optional — for translation alerts)
 // =============================================================================
 
 import { getProfile } from "./_profile.js";
 import { getSecret } from "./_secrets.js";
-import { addHistory, getHistory, saveHistory, getStr, setStr, setRaw } from "./_store.js";
+import { addHistory, getHistory, saveHistory, getStr, setStr, setRaw, getRaw } from "./_store.js";
 import { checkDuplicate, recordPost } from "../../lib/similarity-guard.js";
 
 // maxDuration bumped 180 → 300 (2026-08-28): needs to be ≥ generate.js's 300s
@@ -75,6 +91,44 @@ export const config = { maxDuration: 300 };
 // KV wrappers for similarity-guard (strip "abb:" prefix — _store adds its own)
 const kvGet = (k) => getStr(k.startsWith("abb:") ? k.slice(4) : k);
 const kvSet = (k, v) => setStr(k.startsWith("abb:") ? k.slice(4) : k, v);
+
+// ---------------------------------------------------------------------------
+//  Translation configuration (Phase 2)
+// ---------------------------------------------------------------------------
+// Haiku is used for translations — it's ~5× cheaper than Sonnet, more than
+// good enough for prose translation, and its lower latency lets us run 3 langs
+// in parallel comfortably within the 300s function budget.
+const TRANSLATION_MODEL = process.env.CLAUDE_TRANSLATION_MODEL || "claude-haiku-4-5-20251001";
+const TRANSLATION_TIMEOUT_MS = 180_000; // 3 min per language
+
+// Full language names for the translation prompt. Locale hints included so the
+// translator uses UK-appropriate vocabulary from a native ES/DE/HU reader's
+// perspective (Agnes's whole clientele model).
+const LANG_FULL_NAMES = {
+  en: "English (British)",
+  de: "German",
+  es: "Spanish (Spain)",
+  hu: "Hungarian",
+};
+
+// og:locale uses BCP-47 with an underscore (Facebook convention).
+const OG_LOCALES = {
+  en: "en_GB", de: "de_DE", es: "es_ES", hu: "hu_HU",
+};
+
+// schema.org inLanguage uses BCP-47 with a hyphen (W3C convention).
+const BCP47_LOCALES = {
+  en: "en-GB", de: "de-DE", es: "es-ES", hu: "hu-HU",
+};
+
+// Telegram notify (defensive — dynamic import so publish.js survives even if
+// lib/telegram.js is missing in an older repo state).
+async function telegramNotify(msg) {
+  try {
+    const tg = await import("../../lib/telegram.js");
+    if (tg && typeof tg.notify === "function") await tg.notify(msg);
+  } catch (_) { /* silent */ }
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
@@ -96,6 +150,11 @@ export default async function handler(req, res) {
     //  pipeline. github-static only — see deletePost() for the reasoning.
     if (body.action === "delete-post") {
       return await deletePost(res, id, profile, body);
+    }
+
+    // ---- RETRANSLATE (operator action — retry translations for an existing post) ----
+    if (body.action === "retranslate") {
+      return await retranslatePost(res, id, profile, body);
     }
 
     // ---- Route by integration type. github-static publishes by committing an
@@ -280,7 +339,24 @@ export default async function handler(req, res) {
 }
 
 // =============================================================================
-//  GITHUB-STATIC PUBLISHER
+//  GITHUB-STATIC PUBLISHER  (extended for Phase 2 translations)
+// -----------------------------------------------------------------------------
+//  Publish flow for a tenant with translations disabled is unchanged from the
+//  pre-Phase-2 behaviour: generate → images → enrich → template → commit → card.
+//
+//  When profile.translations.enabled === true and profile.translations.langs
+//  is a non-empty array, the flow becomes:
+//    a) EN body enriched with images + internal links (once)
+//    b) Article translated to each target language via Haiku, in parallel
+//    c) Actual hreflang cluster computed from EN + successful translations
+//    d) EN post committed with the shared cluster
+//    e) Each successful translation committed to blog/posts/{lang}/{slug}.html
+//    f) Each language's blog/{lang}/index.html gets a card injection
+//    g) Failed languages get a Telegram alert with a retry command
+//
+//  History gets ONE entry per publish (the EN version), with a translations
+//  array listing published localised URLs — dashboard/similarity-guard code
+//  doesn't need to change.
 // =============================================================================
 
 async function publishToGitHub(req, res, id, profile, body) {
@@ -343,6 +419,8 @@ async function publishToGitHub(req, res, id, profile, body) {
   }
 
   // ---- 2) Images: hero + 2 inline (all hotlinked Pexels URLs) ----
+  //         Same image set is reused across all language versions — a Pexels
+  //         photo of a UK terrace looks the same in German.
   let heroImg = "";
   let inlineImg1 = "";
   let inlineImg2 = "";
@@ -353,158 +431,171 @@ async function publishToGitHub(req, res, id, profile, body) {
   const inlQ2       = article.inlineImageQuery2 || "";
 
   if (process.env.PEXELS_API_KEY) {
-    // Hero
-    if (heroQuery) {
-      try { heroImg = await pexelsImageUrl(heroQuery); }
-      catch (e) { imgWarnings.push("hero: " + e.message); }
-    }
-    // Inline 1
-    if (inlQ1) {
-      try { inlineImg1 = await pexelsImageUrl(inlQ1); }
-      catch (e) { imgWarnings.push("inline1: " + e.message); }
-    }
-    // Inline 2
-    if (inlQ2) {
-      try { inlineImg2 = await pexelsImageUrl(inlQ2); }
-      catch (e) { imgWarnings.push("inline2: " + e.message); }
-    }
-    // De-dupe: skip inline if same URL as hero
-    if (inlineImg1 && inlineImg1 === heroImg) { inlineImg1 = ""; imgWarnings.push("inline1 de-duped (same as hero)"); }
-    if (inlineImg2 && inlineImg2 === heroImg) { inlineImg2 = ""; imgWarnings.push("inline2 de-duped (same as hero)"); }
+    if (heroQuery)  { try { heroImg    = await pexelsImageUrl(heroQuery); } catch (e) { imgWarnings.push("hero: " + e.message); } }
+    if (inlQ1)      { try { inlineImg1 = await pexelsImageUrl(inlQ1); }     catch (e) { imgWarnings.push("inline1: " + e.message); } }
+    if (inlQ2)      { try { inlineImg2 = await pexelsImageUrl(inlQ2); }     catch (e) { imgWarnings.push("inline2: " + e.message); } }
+    if (inlineImg1 && inlineImg1 === heroImg)    { inlineImg1 = ""; imgWarnings.push("inline1 de-duped (same as hero)"); }
+    if (inlineImg2 && inlineImg2 === heroImg)    { inlineImg2 = ""; imgWarnings.push("inline2 de-duped (same as hero)"); }
     if (inlineImg2 && inlineImg2 === inlineImg1) { inlineImg2 = ""; imgWarnings.push("inline2 de-duped (same as inline1)"); }
   }
 
-  // Fallback hero
   if (!heroImg) heroImg = `${(profile.siteUrl || "").replace(/\/+$/, "")}/img/og-cover.jpg`;
 
-  // Log shortages
   const imgCount = 1 + (inlineImg1 ? 1 : 0) + (inlineImg2 ? 1 : 0);
-  if (imgCount < 3) {
-    console.warn(`[${id}] Image shortage: ${imgCount}/3 images found.`, imgWarnings.join("; "));
-  }
+  if (imgCount < 3) console.warn(`[${id}] Image shortage: ${imgCount}/3 images found.`, imgWarnings.join("; "));
 
-  // Inject inline images into article body
-  let articleBody = article.body || "";
-  articleBody = injectInlineImages(articleBody, inlineImg1, inlineImg2, inlQ1, inlQ2);
+  // ---- 3) Enrich EN body ONCE with images + internal links ----
+  //         Translation happens AFTER this so translators see the real <img>
+  //         tags and existing hrefs, and preserve them verbatim.
+  let enBody = article.body || "";
+  enBody = injectInlineImages(enBody, inlineImg1, inlineImg2, inlQ1, inlQ2);
 
-  // Internal links (Phase 5a) — opt-in via profile.authority.enabled, needs history
   if (profile.authority?.enabled) {
     try {
       const history = await getHistory(id);
-      articleBody = await addInternalLinks(articleBody, history, article.title);
+      enBody = await addInternalLinks(enBody, history, article.title);
     } catch (e) {
       console.error(`[${id}] Internal linking failed (continuing):`, e.message);
     }
   }
+  // Replace the article body with the enriched version — this is what the
+  // translator will receive and produce translated copies from.
+  article.body = enBody;
 
-  // Resolve language once — used by byline, reviewer, FAQ, and index card
-  const lang = article.language || profile.primaryLanguage || "en";
-
-  // E-E-A-T: reviewer line (before FAQ, at end of article body)
-  if (profile.author?.reviewerName) {
-    articleBody = appendReviewerLine(articleBody, profile.author, lang);
-  }
-
-  // FAQ section (Phase 5b) — visible HTML + FAQPage JSON-LD for AI citations
-  if (article.faq && article.faq.length) {
-    articleBody = appendFaq(articleBody, article.faq, lang);
-  }
-
-  // ---- 3) Build slug + dates (must come before byline injection — byline uses dateDisplay) ----
+  // ---- 4) Slug + dates ----
   const slug = slugify(article.title);
   const now  = new Date();
-  const dateIso     = now.toISOString();
-  const dateDisplay = formatDateHu(now, lang);
+  const dateIso = now.toISOString();
+  const enLang  = article.language || profile.primaryLanguage || "en";
 
-  // E-E-A-T: byline block (prepended to top of article content)
-  if (profile.author?.name) {
-    articleBody = prependByline(articleBody, profile.author, dateDisplay);
+  // ---- 5) Determine target languages and translate in parallel ----
+  const trConfig = profile.translations || {};
+  const targetLangs = (trConfig.enabled && Array.isArray(trConfig.langs))
+    ? trConfig.langs.filter(l => l !== enLang && LANG_FULL_NAMES[l])
+    : [];
+
+  const translations = [];
+  const translationErrors = [];
+  if (targetLangs.length) {
+    console.log(`[${id}] Translating "${slug}" to: ${targetLangs.join(", ")}`);
+    const results = await Promise.allSettled(targetLangs.map(l => translateArticle(article, l)));
+    for (let i = 0; i < results.length; i++) {
+      const l = targetLangs[i];
+      const r = results[i];
+      if (r.status === "fulfilled") {
+        translations.push(r.value);
+      } else {
+        translationErrors.push({ lang: l, error: r.reason?.message || String(r.reason) });
+        console.error(`[${id}] Translation to ${l} FAILED:`, r.reason?.message || r.reason);
+      }
+    }
   }
 
-  // ---- 4) Read the post template from the repo ----
+  // ---- 6) Build the hreflang cluster (EN + successful translations) ----
+  const cluster = [enLang, ...translations.map(t => t.language)];
+
+  // ---- 7) Read the post template ----
   const templatePath = "blog/post-template.html";
   const templateFile = await ghGetFile(gh, templatePath, branch);
   if (!templateFile) {
     return res.status(400).json({ error: `Could not read ${templatePath} from ${repo}. Check the repo has the ABB blog structure.` });
   }
   const template = b64decode(templateFile.content);
-
-  // Strip the leading HTML comment block (the <!-- BLOG POST TEMPLATE ... --> note)
   const cleanTemplate = template.replace(/<!--[\s\S]*?-->\s*/, "");
 
-  // ---- TOKEN FILL — dual-emit for hero/body aliases, plus {{TAG}} support.
-  //      Templates from different site scaffolds use different token names;
-  //      ABB fills every recognized variant with the same value so any naming
-  //      convention works. Anything left unrecognized is stripped by the final
-  //      sweep so no {{...}} literal ever leaks into a live post. ----
-  let postHtml = cleanTemplate
-    .replace(/\{\{TITLE\}\}/g,        esc(article.title))
-    .replace(/\{\{DESCRIPTION\}\}/g,  esc(article.metaDescription || article.excerpt || ""))
-    .replace(/\{\{SLUG\}\}/g,         slug)
-    .replace(/\{\{DATE_ISO\}\}/g,     dateIso)
-    .replace(/\{\{DATE_DISPLAY\}\}/g, esc(dateDisplay))
-    .replace(/\{\{HERO_IMG\}\}/g,     esc(heroImg))
-    .replace(/\{\{COVER_IMAGE\}\}/g,  esc(heroImg))                         // alias for HERO_IMG
-    .replace(/\{\{CONTENT\}\}/g,      articleBody)
-    .replace(/\{\{BODY_HTML\}\}/g,    articleBody)                          // alias for CONTENT
-    .replace(/\{\{TAG\}\}/g,          esc(article.category || ""));
-
-  // Safety sweep: strip any unrecognized {{TOKEN}} so it doesn't render as
-  // literal text (this was Bug 1 — {{TAG}}/{{COVER_IMAGE}}/{{BODY_HTML}}
-  // leaking through into a live post on the Agnes Mortgage first publish).
-  postHtml = postHtml.replace(/\{\{[A-Z_][A-Z0-9_]*\}\}/g, "");
-
-  // ---- 4b) Tracking injection (gtag + consent + cookie banner) ----
   const gtagId = profile.tracking?.gtagId || "";
-  if (gtagId) {
-    postHtml = injectTracking(postHtml, gtagId, lang);
-  }
+  const siteUrl = profile.siteUrl || "";
 
-  // ---- 4c) E-E-A-T Article+Author schema injection has been REMOVED.
-  //          Emlektabla's template already emits its own BlogPosting JSON-LD
-  //          for the article, and Google prefers one schema block per page.
-  //          The visible byline (see prependByline above) still carries the
-  //          author signal; FAQPage JSON-LD is still added by appendFaq.
-  //          If a future tenant has NO built-in Article schema in its template,
-  //          re-enable by uncommenting:
-  //   if (profile.author?.name) {
-  //     postHtml = injectAuthorSchema(postHtml, profile.author, article.title, dateIso, heroImg);
-  //   }
+  // ---- 8) Build + commit each version ----
+  const versions = [article, ...translations];
+  const publishResults = [];
 
-  // ---- 5) Commit the post file ----
-  const postPath = `blog/posts/${slug}.html`;
-  const existingPost = await ghGetFile(gh, postPath, branch); // may already exist → update
+  for (const v of versions) {
+    const vLang = v.language;
+    const vDateDisplay = formatDateHu(now, vLang);
 
-  await ghPutFile(gh, postPath, branch,
-    `Add blog post: ${article.title}`,
-    b64encode(postHtml),
-    existingPost?.sha
-  );
+    // Enrich body per language (translated FAQ heading + reviewer label +
+    // localised date-formatted byline).
+    let vBody = v.body || "";
+    if (profile.author?.reviewerName) vBody = appendReviewerLine(vBody, profile.author, vLang);
+    if (v.faq && v.faq.length)        vBody = appendFaq(vBody, v.faq, vLang);
+    if (profile.author?.name)         vBody = prependByline(vBody, profile.author, vDateDisplay);
 
-  // ---- 6) Inject a card into blog/index.html ----
-  let cardInjected = false;
-  try {
-    const indexPath = "blog/index.html";
-    const indexFile = await ghGetFile(gh, indexPath, branch);
-    if (indexFile) {
-      const indexHtml = b64decode(indexFile.content);
-      const updated = injectCard(indexHtml, {
-        slug, title: article.title,
-        excerpt: article.excerpt || article.metaDescription || "",
-        heroImg, dateIso, dateDisplay,
-      }, profile, lang);
-      if (updated && updated !== indexHtml) {
-        await ghPutFile(gh, indexPath, branch,
-          `Add "${article.title}" to blog index`,
-          b64encode(updated),
-          indexFile.sha
-        );
-        cardInjected = true;
+    // Build the post HTML with correct per-language canonical + shared cluster
+    let postHtml = buildPostHtml(cleanTemplate, {
+      article:     v,
+      slug,
+      dateIso,
+      dateDisplay: vDateDisplay,
+      heroImg,
+      siteUrl,
+      lang:        vLang,
+      cluster,
+      finalBody:   vBody,
+    });
+
+    if (gtagId) postHtml = injectTracking(postHtml, gtagId, vLang);
+
+    // Commit post file — EN at blog/posts/{slug}.html, others at blog/posts/{lang}/{slug}.html
+    const postPath = vLang === enLang
+      ? `blog/posts/${slug}.html`
+      : `blog/posts/${vLang}/${slug}.html`;
+    const existingPost = await ghGetFile(gh, postPath, branch);
+    await ghPutFile(gh, postPath, branch,
+      vLang === enLang
+        ? `Add blog post: ${v.title}`
+        : `Add ${vLang.toUpperCase()} translation: ${v.title}`,
+      b64encode(postHtml),
+      existingPost?.sha
+    );
+
+    // Inject card into the correct language index
+    const indexPath = vLang === enLang ? "blog/index.html" : `blog/${vLang}/index.html`;
+    let cardInjected = false;
+    try {
+      const indexFile = await ghGetFile(gh, indexPath, branch);
+      if (indexFile) {
+        const indexHtml = b64decode(indexFile.content);
+        const cardUrl = vLang === enLang ? `/blog/posts/${slug}` : `/blog/posts/${vLang}/${slug}`;
+        const updated = injectCard(indexHtml, {
+          slug,
+          title:       v.title,
+          excerpt:     v.excerpt || v.metaDescription || "",
+          heroImg,
+          dateIso,
+          dateDisplay: vDateDisplay,
+          url:         cardUrl,
+        }, profile, vLang);
+        if (updated && updated !== indexHtml) {
+          await ghPutFile(gh, indexPath, branch,
+            `Add "${v.title}" to ${vLang} blog index`,
+            b64encode(updated),
+            indexFile.sha
+          );
+          cardInjected = true;
+        }
+      } else if (vLang !== enLang) {
+        console.warn(`[${id}] ${indexPath} not found — skipping card for ${vLang}. Create the language index first.`);
       }
+    } catch (e) {
+      console.error(`[${id}] Index card injection failed for ${vLang} (post still committed):`, e.message);
     }
-  } catch (e) {
-    console.error("Index card injection failed (post still committed):", e.message);
+
+    const versionUrl = vLang === enLang
+      ? `${siteUrl.replace(/\/+$/, "")}/blog/posts/${slug}`
+      : `${siteUrl.replace(/\/+$/, "")}/blog/posts/${vLang}/${slug}`;
+    publishResults.push({ lang: vLang, url: versionUrl, cardInjected });
   }
+
+  // ---- 9) Snapshot for retranslate — stores the enriched EN article (images
+  //         already injected, links added) so a later retranslate uses the
+  //         exact same body the original translations saw.
+  await setRaw(`t:${id}:articles:${slug}`, {
+    original:       { ...article },
+    publishedLangs: publishResults.map(r => r.lang),
+    heroImg,
+    savedAt:        dateIso,
+  }).catch(e => console.error(`[${id}] Article snapshot save failed (non-critical):`, e.message));
 
   // ── SIMILARITY GUARD: record this post's fingerprint for future checks ──
   if (dupCheck.draftShingles && dupCheck.draftShingles.length) {
@@ -513,30 +604,482 @@ async function publishToGitHub(req, res, id, profile, body) {
     }).catch(e => console.error(`[${id}] Shingle record failed (non-critical):`, e.message));
   }
 
-  // ---- 7) Log to tenant history ----
-  const postUrl = `${(profile.siteUrl || "").replace(/\/+$/, "")}/blog/posts/${slug}`;
+  // ---- 10) Log to tenant history — one entry per publish, with translations array ----
+  const enUrl = `${siteUrl.replace(/\/+$/, "")}/blog/posts/${slug}`;
   await addHistory(id, {
     title:        article.title,
-    url:          postUrl,
-    status:       "publish",       // a commit is live — no draft concept
+    url:          enUrl,
+    status:       "publish",
     category:     article.category || null,
-    language:     lang,
+    language:     enLang,
     topic:        article.topic || "",
     archetype:    article.archetype || null,
+    translations: translations.map(t => ({
+      lang: t.language,
+      url:  `${siteUrl.replace(/\/+$/, "")}/blog/posts/${t.language}/${slug}`,
+    })),
     published_at: dateIso,
   });
+
+  // ---- 11) Telegram alert on translation failures (silent on full success) ----
+  if (translationErrors.length && targetLangs.length) {
+    const msg = [
+      `🌐 Translation partial · ${id}`,
+      `Post: ${article.title.slice(0, 90)}`,
+      `Slug: ${slug}`,
+      `✅ Success: ${translations.map(t => t.language).join(", ") || "(none)"}`,
+      `❌ Failed:  ${translationErrors.map(e => e.lang).join(", ")}`,
+      "",
+      ...translationErrors.map(e => `Error (${e.lang}): ${(e.error || "").slice(0, 220)}`),
+      "",
+      `Retry:`,
+      `POST /api/app/publish`,
+      `{"id":"${id}","action":"retranslate","slug":"${slug}"}`,
+    ].join("\n");
+    telegramNotify(msg).catch(() => {});
+  }
 
   return res.status(200).json({
     ok: true, id,
     post: {
-      title:  article.title,
-      url:    postUrl,
-      status: "publish",
+      title:         article.title,
+      url:           enUrl,
+      status:        "publish",
       slug,
       featuredImage: !!heroImg,
-      indexUpdated: cardInjected,
-      archetype: article.archetype || null,
+      indexUpdated:  publishResults[0]?.cardInjected || false,
+      archetype:     article.archetype || null,
+      versions:      publishResults,
+      translationErrors,
     },
+  });
+}
+
+// =============================================================================
+//  TRANSLATE ARTICLE  (Phase 2 — Haiku call)
+// -----------------------------------------------------------------------------
+//  Takes an EN article (post-image-injection, post-internal-links) and returns
+//  the same shape with title, metaDescription, excerpt, body, category and FAQ
+//  translated to targetLang. Preserves all HTML markup, all href URLs, all img
+//  src URLs and inline styles — the translator only touches visible text and
+//  alt attributes.
+//
+//  Fails fast: raises on API errors, timeout, max_tokens truncation, or missing
+//  required fields. Called via Promise.allSettled from publishToGitHub so one
+//  language failure never blocks the others.
+// =============================================================================
+
+async function translateArticle(article, targetLang) {
+  const targetName = LANG_FULL_NAMES[targetLang];
+  if (!targetName) throw new Error(`Unknown target language: ${targetLang}`);
+
+  const tool = {
+    name: "translated_article",
+    description: `Return the article fully translated into ${targetName}.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        title:           { type: "string", description: `The article title, translated to ${targetName}. Keep it natural and SEO-friendly.` },
+        metaDescription: { type: "string", description: `The meta description, translated to ${targetName}. Aim for 150-160 characters.` },
+        excerpt:         { type: "string", description: `The 1-2 sentence excerpt, translated to ${targetName}.` },
+        body:            { type: "string", description: `The full article body HTML, translated to ${targetName}. Preserve every HTML tag exactly (h2, h3, p, ul, li, strong, em, img, a, div, section, span, br). Preserve every href="..." URL exactly — only translate anchor text. Preserve every img src="..." exactly — translate the alt="..." text. Preserve all inline style attributes. Preserve the structure and order of every section.` },
+        category:        { type: "string", description: `Category label translated to ${targetName}. Keep short (1-3 words). Industry terms like "Buy-to-Let" or "HMO" may stay in English if that's the conventional usage in ${targetName}.` },
+        faq: {
+          type: "array",
+          description: `FAQ items translated to ${targetName}.`,
+          items: {
+            type: "object",
+            properties: {
+              question: { type: "string", description: "Question translated naturally." },
+              answer:   { type: "string", description: "Answer translated naturally, keeping 2-3 sentences." },
+            },
+            required: ["question", "answer"],
+          },
+        },
+      },
+      required: ["title", "metaDescription", "excerpt", "body", "faq"],
+    },
+  };
+
+  const system = `You are a professional financial translator working for a UK mortgage broker's blog. Translate content into ${targetName} while preserving all HTML markup exactly.
+
+CRITICAL RULES:
+- Preserve every HTML tag, attribute, and inline style exactly as-is
+- Preserve every href="..." URL exactly — only translate the anchor text between <a>...</a>
+- Preserve every img src="..." exactly — translate the alt="..." text
+- Do not add commentary, notes, or explanations — only the translation
+- Financial and legal terms should use correct UK-context terminology described naturally for a ${targetName}-speaking reader
+- Keep the same tone, register, and paragraph structure as the source
+- Never modify URLs, paths, or file extensions
+- The closing "Working with [brand]" paragraph stays as a paragraph — translate its prose but keep any link paths (like /#contact) unchanged`;
+
+  const userMsg = `Translate this article to ${targetName}. Call the translated_article tool with the complete translation.
+
+TITLE: ${article.title}
+
+META DESCRIPTION: ${article.metaDescription || ""}
+
+EXCERPT: ${article.excerpt || ""}
+
+CATEGORY: ${article.category || ""}
+
+BODY HTML:
+${article.body}
+
+FAQ (${(article.faq || []).length} items):
+${JSON.stringify(article.faq || [], null, 2)}`;
+
+  const ctrl = new AbortController();
+  const timeoutId = setTimeout(() => ctrl.abort(), TRANSLATION_TIMEOUT_MS);
+  const t0 = Date.now();
+
+  let apiRes;
+  try {
+    apiRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: TRANSLATION_MODEL,
+        max_tokens: 8000,
+        system,
+        messages: [{ role: "user", content: userMsg }],
+        tools: [tool],
+        tool_choice: { type: "tool", name: "translated_article" },
+      }),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    if (e.name === "AbortError") {
+      throw new Error(`Translation to ${targetLang} timed out after ${TRANSLATION_TIMEOUT_MS / 1000}s`);
+    }
+    throw new Error(`Translation to ${targetLang} fetch failed: ${e.message}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  const dtMs = Date.now() - t0;
+
+  if (!apiRes.ok) {
+    throw new Error(`Translation to ${targetLang} API ${apiRes.status} after ${dtMs}ms: ${(await apiRes.text()).slice(0, 220)}`);
+  }
+
+  const data = await apiRes.json();
+  if (data.stop_reason === "max_tokens") {
+    throw new Error(`Translation to ${targetLang} truncated at max_tokens after ${dtMs}ms — article too long.`);
+  }
+
+  const block = (data.content || []).find(b => b.type === "tool_use");
+  if (!block || !block.input) {
+    throw new Error(`Translation to ${targetLang} returned no tool_use after ${dtMs}ms. stop_reason=${data.stop_reason}`);
+  }
+
+  const translated = block.input;
+  if (!translated.title || !translated.body) {
+    throw new Error(`Translation to ${targetLang} incomplete (title=${!!translated.title}, body=${!!translated.body}) after ${dtMs}ms.`);
+  }
+
+  console.log(`[translate] ${targetLang}: ok in ${dtMs}ms, ${translated.body.length} body chars.`);
+
+  // Preserve every non-translated field from the source; overlay the translated ones.
+  return {
+    ...article,
+    title:           translated.title,
+    metaDescription: translated.metaDescription || article.metaDescription,
+    excerpt:         translated.excerpt || article.excerpt,
+    body:            translated.body,
+    category:        translated.category || article.category,
+    faq:             translated.faq && translated.faq.length ? translated.faq : article.faq,
+    language:        targetLang,
+  };
+}
+
+// =============================================================================
+//  BUILD POST HTML  (Phase 2 — extends the old inline token fill)
+// -----------------------------------------------------------------------------
+//  Fills every recognized token, then strips anything unrecognized so no
+//  literal {{FOO}} ever leaks into a published post. Backward-compatible with
+//  the pre-Phase-2 token set — new tokens (LANG, CANONICAL_URL, HREFLANG_TAGS,
+//  OG_LOCALE, OG_LOCALE_ALTERNATES, LANG_BCP47, TAG_CRUMB, META_TAG_SEP) are
+//  simply ignored by an older template that doesn't reference them.
+// =============================================================================
+
+function buildPostHtml(cleanTemplate, ctx) {
+  const { article, slug, dateIso, dateDisplay, heroImg, siteUrl, lang, cluster, finalBody } = ctx;
+
+  const canonicalUrl = buildPostUrl(siteUrl, slug, lang);
+  const hreflangTags = buildHreflangTags(siteUrl, slug, cluster);
+  const ogLocale     = OG_LOCALES[lang] || OG_LOCALES.en;
+  const ogAlternates = buildOgLocaleAlternates(lang, cluster);
+  const bcp47        = BCP47_LOCALES[lang] || BCP47_LOCALES.en;
+
+  const tag        = (article.category || "").trim();
+  const tagCrumb   = tag ? `<span>›</span><span>${esc(tag)}</span>` : "";
+  const metaTagSep = tag ? ` · ${esc(tag)}` : "";
+
+  let html = cleanTemplate
+    .replace(/\{\{TITLE\}\}/g,                esc(article.title))
+    .replace(/\{\{DESCRIPTION\}\}/g,          esc(article.metaDescription || article.excerpt || ""))
+    .replace(/\{\{SLUG\}\}/g,                 slug)
+    .replace(/\{\{DATE_ISO\}\}/g,             dateIso)
+    .replace(/\{\{DATE_DISPLAY\}\}/g,         esc(dateDisplay))
+    .replace(/\{\{HERO_IMG\}\}/g,             esc(heroImg))
+    .replace(/\{\{COVER_IMAGE\}\}/g,          esc(heroImg))
+    .replace(/\{\{CONTENT\}\}/g,              finalBody)
+    .replace(/\{\{BODY_HTML\}\}/g,            finalBody)
+    .replace(/\{\{TAG\}\}/g,                  esc(tag))
+    .replace(/\{\{TAG_CRUMB\}\}/g,            tagCrumb)
+    .replace(/\{\{META_TAG_SEP\}\}/g,         metaTagSep)
+    .replace(/\{\{LANG\}\}/g,                 lang)
+    .replace(/\{\{CANONICAL_URL\}\}/g,        canonicalUrl)
+    .replace(/\{\{HREFLANG_TAGS\}\}/g,        hreflangTags)
+    .replace(/\{\{OG_LOCALE\}\}/g,            ogLocale)
+    .replace(/\{\{OG_LOCALE_ALTERNATES\}\}/g, ogAlternates)
+    .replace(/\{\{LANG_BCP47\}\}/g,           bcp47);
+
+  // Safety sweep — anything left is stripped so no {{FOO}} literal leaks.
+  html = html.replace(/\{\{[A-Z_][A-Z0-9_]*\}\}/g, "");
+
+  return html;
+}
+
+// -----------------------------------------------------------------------------
+//  URL builders + hreflang helpers
+// -----------------------------------------------------------------------------
+
+function buildPostUrl(siteUrl, slug, lang) {
+  const base = (siteUrl || "").replace(/\/+$/, "");
+  return lang === "en"
+    ? `${base}/blog/posts/${slug}`
+    : `${base}/blog/posts/${lang}/${slug}`;
+}
+
+// Google's strict rule: every URL in an alternates cluster must declare the
+// FULL set (including itself) plus x-default → the default language (EN here).
+function buildHreflangTags(siteUrl, slug, cluster) {
+  const lines = [];
+  for (const l of cluster) {
+    lines.push(`<link rel="alternate" hreflang="${l}" href="${buildPostUrl(siteUrl, slug, l)}">`);
+  }
+  lines.push(`<link rel="alternate" hreflang="x-default" href="${buildPostUrl(siteUrl, slug, "en")}">`);
+  return lines.join("\n");
+}
+
+// og:locale:alternate for every OTHER language in the cluster (Facebook / OG).
+function buildOgLocaleAlternates(currentLang, cluster) {
+  return cluster
+    .filter(l => l !== currentLang && OG_LOCALES[l])
+    .map(l => `<meta property="og:locale:alternate" content="${OG_LOCALES[l]}">`)
+    .join("\n");
+}
+
+// =============================================================================
+//  RETRANSLATE POST  (Phase 2 operator action)
+// -----------------------------------------------------------------------------
+//  POST /api/app/publish { id, action:"retranslate", slug, langs? }
+//
+//  Re-runs translations for an already-published EN post. Reads the article
+//  snapshot stored at publish time from KV, translates to the requested langs
+//  (or all configured langs if omitted), commits each new/updated translation,
+//  injects cards into each language index, and re-emits the EN post with an
+//  updated hreflang cluster so Google sees the added languages.
+//
+//  Common uses:
+//    - A language failed at publish time and needs retry
+//    - New target language added to profile.translations.langs after publish
+//    - Manual translation refresh (e.g. after a translator prompt change)
+// =============================================================================
+
+async function retranslatePost(res, id, profile, body) {
+  if (profile.integration?.type !== "github-static") {
+    return res.status(400).json({ error: "Retranslate is only supported for github-static tenants." });
+  }
+
+  const slug = (body.slug || "").trim();
+  if (!slug) return res.status(400).json({ error: "Missing 'slug' of the post to retranslate." });
+
+  const trConfig = profile.translations || {};
+  const configLangs = (trConfig.enabled && Array.isArray(trConfig.langs)) ? trConfig.langs : [];
+  if (!configLangs.length) {
+    return res.status(400).json({ error: "No translation languages configured for this tenant (profile.translations.langs empty)." });
+  }
+
+  // Optional per-request lang filter — otherwise re-translate all configured langs.
+  const requestLangs = Array.isArray(body.langs) && body.langs.length
+    ? body.langs.filter(l => configLangs.includes(l))
+    : configLangs;
+  if (!requestLangs.length) {
+    return res.status(400).json({ error: "Requested languages don't intersect with tenant config." });
+  }
+
+  const snapshot = await getRaw(`t:${id}:articles:${slug}`);
+  if (!snapshot || !snapshot.original) {
+    return res.status(404).json({ error: `No article snapshot found for slug "${slug}". Cannot retranslate — was this post published before Phase 2?` });
+  }
+  const article = snapshot.original;
+  const enLang = article.language || profile.primaryLanguage || "en";
+
+  const repo   = await getSecret(id, "github_repo");
+  const branch = (await getSecret(id, "github_branch")) || "main";
+  const token  = await getSecret(id, "github_token");
+  if (!repo || !token) return res.status(400).json({ error: "GitHub not connected." });
+
+  const gh = {
+    token,
+    api: `https://api.github.com/repos/${repo}/contents`,
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "AIBlogBuilder/2.0",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  };
+
+  // Translate to each requested target lang (skip EN itself).
+  const targetLangs = requestLangs.filter(l => l !== enLang);
+  const translations = [];
+  const translationErrors = [];
+  if (targetLangs.length) {
+    console.log(`[${id}] Retranslating "${slug}" to: ${targetLangs.join(", ")}`);
+    const results = await Promise.allSettled(targetLangs.map(l => translateArticle(article, l)));
+    for (let i = 0; i < results.length; i++) {
+      const l = targetLangs[i];
+      const r = results[i];
+      if (r.status === "fulfilled") translations.push(r.value);
+      else translationErrors.push({ lang: l, error: r.reason?.message || String(r.reason) });
+    }
+  }
+
+  // Read template
+  const templateFile = await ghGetFile(gh, "blog/post-template.html", branch);
+  if (!templateFile) return res.status(400).json({ error: "Could not read blog/post-template.html" });
+  const cleanTemplate = b64decode(templateFile.content).replace(/<!--[\s\S]*?-->\s*/, "");
+
+  const heroImg = snapshot.heroImg || `${(profile.siteUrl || "").replace(/\/+$/, "")}/img/og-cover.jpg`;
+  const gtagId  = profile.tracking?.gtagId || "";
+  const siteUrl = profile.siteUrl || "";
+
+  // Cluster = EN + everything previously published + everything newly translated (dedup).
+  const priorLangs = Array.isArray(snapshot.publishedLangs) ? snapshot.publishedLangs : [enLang];
+  const cluster = Array.from(new Set([enLang, ...priorLangs, ...translations.map(t => t.language)]));
+
+  // Reuse the original publish timestamp so lastmod/git-history don't lie.
+  const savedIso = snapshot.savedAt || new Date().toISOString();
+  const savedDate = new Date(savedIso);
+
+  const publishResults = [];
+
+  // ---- Refresh EN post (hreflang cluster may have grown) ----
+  try {
+    const enDateDisplay = formatDateHu(savedDate, enLang);
+    let enBody = article.body || "";
+    if (profile.author?.reviewerName) enBody = appendReviewerLine(enBody, profile.author, enLang);
+    if (article.faq && article.faq.length) enBody = appendFaq(enBody, article.faq, enLang);
+    if (profile.author?.name) enBody = prependByline(enBody, profile.author, enDateDisplay);
+
+    let enHtml = buildPostHtml(cleanTemplate, {
+      article, slug, dateIso: savedIso, dateDisplay: enDateDisplay,
+      heroImg, siteUrl, lang: enLang, cluster, finalBody: enBody,
+    });
+    if (gtagId) enHtml = injectTracking(enHtml, gtagId, enLang);
+
+    const enPath = `blog/posts/${slug}.html`;
+    const enExisting = await ghGetFile(gh, enPath, branch);
+    await ghPutFile(gh, enPath, branch,
+      `Refresh EN hreflang: ${article.title}`,
+      b64encode(enHtml),
+      enExisting?.sha
+    );
+    publishResults.push({ lang: enLang, refreshed: true });
+  } catch (e) {
+    console.error(`[${id}] EN refresh failed during retranslate:`, e.message);
+    publishResults.push({ lang: enLang, refreshed: false, error: e.message });
+  }
+
+  // ---- Commit each translated version + card ----
+  for (const v of translations) {
+    const vLang = v.language;
+    const vDateDisplay = formatDateHu(savedDate, vLang);
+
+    let vBody = v.body || "";
+    if (profile.author?.reviewerName) vBody = appendReviewerLine(vBody, profile.author, vLang);
+    if (v.faq && v.faq.length)        vBody = appendFaq(vBody, v.faq, vLang);
+    if (profile.author?.name)         vBody = prependByline(vBody, profile.author, vDateDisplay);
+
+    let postHtml = buildPostHtml(cleanTemplate, {
+      article: v, slug, dateIso: savedIso, dateDisplay: vDateDisplay,
+      heroImg, siteUrl, lang: vLang, cluster, finalBody: vBody,
+    });
+    if (gtagId) postHtml = injectTracking(postHtml, gtagId, vLang);
+
+    const postPath = `blog/posts/${vLang}/${slug}.html`;
+    const existing = await ghGetFile(gh, postPath, branch);
+    await ghPutFile(gh, postPath, branch,
+      `Retranslate ${vLang.toUpperCase()}: ${v.title}`,
+      b64encode(postHtml),
+      existing?.sha
+    );
+
+    let cardInjected = false;
+    try {
+      const indexPath = `blog/${vLang}/index.html`;
+      const indexFile = await ghGetFile(gh, indexPath, branch);
+      if (indexFile) {
+        const indexHtml = b64decode(indexFile.content);
+        const cardUrl = `/blog/posts/${vLang}/${slug}`;
+        const updated = injectCard(indexHtml, {
+          slug, title: v.title,
+          excerpt: v.excerpt || v.metaDescription || "",
+          heroImg, dateIso: savedIso, dateDisplay: vDateDisplay,
+          url: cardUrl,
+        }, profile, vLang);
+        if (updated && updated !== indexHtml) {
+          await ghPutFile(gh, indexPath, branch,
+            `Add "${v.title}" to ${vLang} blog index`,
+            b64encode(updated),
+            indexFile.sha
+          );
+          cardInjected = true;
+        }
+      } else {
+        console.warn(`[${id}] ${indexPath} not found — skipping card for ${vLang}.`);
+      }
+    } catch (e) {
+      console.error(`[${id}] Card injection failed for ${vLang} during retranslate:`, e.message);
+    }
+
+    publishResults.push({ lang: vLang, cardInjected });
+  }
+
+  // Update snapshot's publishedLangs so future retranslates know the full cluster.
+  await setRaw(`t:${id}:articles:${slug}`, {
+    ...snapshot,
+    publishedLangs:    cluster,
+    lastRetranslateAt: new Date().toISOString(),
+  }).catch(e => console.error(`[${id}] Snapshot update failed:`, e.message));
+
+  // Telegram alert on any failures.
+  if (translationErrors.length) {
+    const msg = [
+      `🔁 Retranslate partial · ${id}`,
+      `Post: ${article.title.slice(0, 90)}`,
+      `Slug: ${slug}`,
+      `✅ Success: ${translations.map(t => t.language).join(", ") || "(none)"}`,
+      `❌ Failed:  ${translationErrors.map(e => e.lang).join(", ")}`,
+      "",
+      ...translationErrors.map(e => `Error (${e.lang}): ${(e.error || "").slice(0, 220)}`),
+    ].join("\n");
+    telegramNotify(msg).catch(() => {});
+  }
+
+  return res.status(200).json({
+    ok: true, id, slug,
+    translated:  translations.map(t => t.language),
+    errors:      translationErrors,
+    cluster,
+    versions:    publishResults,
   });
 }
 
@@ -872,9 +1415,13 @@ function injectCard(indexHtml, p, profile, lang) {
 }
 
 // Build the card HTML — Plan A (profile config) → Plan B (sniff) → Plan C (default).
+//
+// Phase 2 change: URL is taken from p.url if provided (so translated cards can
+// point at /blog/posts/{lang}/{slug}). Falls back to /blog/posts/{slug} for
+// callers that don't set it — backward compatible with pre-Phase-2 code paths.
 function buildCardHtml(p, profile, existingMiddle, readMore) {
   const vars = {
-    URL:          `/blog/posts/${p.slug}`,
+    URL:          p.url || `/blog/posts/${p.slug}`,
     HERO:         p.heroImg,
     TITLE:        p.title,
     DATE_ISO:     p.dateIso,
