@@ -887,6 +887,36 @@ function buildHreflangTags(siteUrl, slug, cluster) {
   return lines.join("\n");
 }
 
+// Swap the <link rel="alternate" hreflang=...> block in an already-rendered
+// page for a new one, without re-running the template. Used when the cluster
+// grows and a language's translated body isn't in hand — only the alternates
+// need to change, so a surgical <head> patch beats a re-translation.
+//
+// Removes every existing hreflang link (including x-default) and inserts the
+// new block where the first one was. If the page has none, the block goes in
+// immediately after <link rel="canonical" ...>.
+function replaceHreflangBlock(html, newBlock) {
+  const linkRe = /[ \t]*<link\s+rel="alternate"\s+hreflang="[^"]*"\s+href="[^"]*"\s*\/?>\n?/gi;
+  const matches = [...html.matchAll(linkRe)];
+
+  if (matches.length) {
+    const firstAt = matches[0].index;
+    const stripped = html.replace(linkRe, "");
+    // The strip shifts everything after the first match left; recompute by
+    // splitting on the untouched prefix instead of trusting the old offset.
+    const prefix = html.slice(0, firstAt);
+    const rest = stripped.slice(prefix.length);
+    return prefix + newBlock + "\n" + rest;
+  }
+
+  const canonRe = /(<link\s+rel="canonical"[^>]*>)/i;
+  if (canonRe.test(html)) return html.replace(canonRe, `$1\n${newBlock}`);
+
+  // No canonical either — put it just before </head> rather than dropping it.
+  if (html.includes("</head>")) return html.replace("</head>", `${newBlock}\n</head>`);
+  return html;
+}
+
 // og:locale:alternate for every OTHER language in the cluster (Facebook / OG).
 function buildOgLocaleAlternates(currentLang, cluster) {
   return cluster
@@ -935,6 +965,9 @@ async function retranslatePost(res, id, profile, body) {
   }
 
   const snapshot = await getRaw(`t:${id}:articles:${slug}`);
+  if (snapshot && snapshot.deleted) {
+    return res.status(410).json({ error: `Post "${slug}" was deleted on ${snapshot.deletedAt}. Retranslate would resurrect it — republish instead if that's what you want.` });
+  }
   if (!snapshot || !snapshot.original) {
     return res.status(404).json({ error: `No article snapshot found for slug "${slug}". Cannot retranslate — was this post published before Phase 2?` });
   }
@@ -992,77 +1025,106 @@ async function retranslatePost(res, id, profile, body) {
 
   const publishResults = [];
 
-  // ---- Refresh EN post (hreflang cluster may have grown) ----
-  try {
-    const enDateDisplay = formatDateHu(savedDate, enLang);
-    let enBody = article.body || "";
-    if (profile.author?.reviewerName) enBody = appendReviewerLine(enBody, profile.author, enLang);
-    if (article.faq && article.faq.length) enBody = appendFaq(enBody, article.faq, enLang);
-    if (profile.author?.name) enBody = prependByline(enBody, profile.author, enDateDisplay);
+  // ---- Rewrite EVERY language in the final cluster (fix 2026-08-31) --------
+  //  Google requires alternates to be reciprocal: if HU declares DE, DE must
+  //  declare HU, or the alternate is ignored. The first version of this
+  //  function only rewrote EN plus the newly-translated languages, so a
+  //  retranslate that ADDED a language (e.g. HU failed at publish, retried
+  //  later) left the already-published DE and ES pages declaring the old,
+  //  smaller cluster — silently breaking the group.
+  //
+  //  So: every language in `cluster` gets its post file rewritten with the
+  //  same alternate set. Newly-translated languages use fresh content;
+  //  previously-published ones are re-rendered from their existing file, with
+  //  only the <head> alternate block changing.
+  const freshByLang = new Map(translations.map(t => [t.language, t]));
 
-    let enHtml = buildPostHtml(cleanTemplate, {
-      article, slug, dateIso: savedIso, dateDisplay: enDateDisplay,
-      heroImg, siteUrl, lang: enLang, cluster, finalBody: enBody,
-    });
-    if (gtagId) enHtml = injectTracking(enHtml, gtagId, enLang);
-
-    const enPath = `blog/posts/${slug}.html`;
-    const enExisting = await ghGetFile(gh, enPath, branch);
-    await ghPutFile(gh, enPath, branch,
-      `Refresh EN hreflang: ${article.title}`,
-      b64encode(enHtml),
-      enExisting?.sha
-    );
-    publishResults.push({ lang: enLang, refreshed: true });
-  } catch (e) {
-    console.error(`[${id}] EN refresh failed during retranslate:`, e.message);
-    publishResults.push({ lang: enLang, refreshed: false, error: e.message });
-  }
-
-  // ---- Commit each translated version + card ----
-  for (const v of translations) {
-    const vLang = v.language;
+  for (const vLang of cluster) {
     const vDateDisplay = formatDateHu(savedDate, vLang);
+    const postPath = vLang === enLang
+      ? `blog/posts/${slug}.html`
+      : `blog/posts/${vLang}/${slug}.html`;
 
-    let vBody = v.body || "";
-    if (profile.author?.reviewerName) vBody = appendReviewerLine(vBody, profile.author, vLang);
-    if (v.faq && v.faq.length)        vBody = appendFaq(vBody, v.faq, vLang);
-    if (profile.author?.name)         vBody = prependByline(vBody, profile.author, vDateDisplay);
-
-    let postHtml = buildPostHtml(cleanTemplate, {
-      article: v, slug, dateIso: savedIso, dateDisplay: vDateDisplay,
-      heroImg, siteUrl, lang: vLang, cluster, finalBody: vBody,
-    });
-    if (gtagId) postHtml = injectTracking(postHtml, gtagId, vLang);
-
-    const postPath = `blog/posts/${vLang}/${slug}.html`;
-    const existing = await ghGetFile(gh, postPath, branch);
-    await ghPutFile(gh, postPath, branch,
-      `Retranslate ${vLang.toUpperCase()}: ${v.title}`,
-      b64encode(postHtml),
-      existing?.sha
-    );
-
-    let cardInjected = false;
     try {
-      const indexPath = `blog/${vLang}/index.html`;
+      const fresh = freshByLang.get(vLang);
+
+      if (vLang === enLang || fresh) {
+        // We hold the source content for this language — render it fully.
+        const srcArticle = vLang === enLang ? article : fresh;
+
+        let vBody = srcArticle.body || "";
+        if (profile.author?.reviewerName) vBody = appendReviewerLine(vBody, profile.author, vLang);
+        if (srcArticle.faq && srcArticle.faq.length) vBody = appendFaq(vBody, srcArticle.faq, vLang);
+        if (profile.author?.name) vBody = prependByline(vBody, profile.author, vDateDisplay);
+
+        let postHtml = buildPostHtml(cleanTemplate, {
+          article: srcArticle, slug, dateIso: savedIso, dateDisplay: vDateDisplay,
+          heroImg, siteUrl, lang: vLang, cluster, finalBody: vBody,
+        });
+        if (gtagId) postHtml = injectTracking(postHtml, gtagId, vLang);
+
+        const existing = await ghGetFile(gh, postPath, branch);
+        await ghPutFile(gh, postPath, branch,
+          fresh
+            ? `Retranslate ${vLang.toUpperCase()}: ${srcArticle.title}`
+            : `Refresh ${vLang.toUpperCase()} hreflang: ${srcArticle.title}`,
+          b64encode(postHtml),
+          existing?.sha
+        );
+        publishResults.push({ lang: vLang, rewritten: true, retranslated: !!fresh });
+      } else {
+        // Previously published, not retranslated this run — we don't hold its
+        // translated body. Patch the alternate block in the live file in place
+        // so the cluster stays reciprocal without re-running a translation.
+        const existing = await ghGetFile(gh, postPath, branch);
+        if (!existing) {
+          console.warn(`[${id}] ${postPath} missing — cannot refresh its hreflang.`);
+          publishResults.push({ lang: vLang, rewritten: false, reason: "file missing" });
+          continue;
+        }
+        const liveHtml = b64decode(existing.content);
+        const patched = replaceHreflangBlock(liveHtml, buildHreflangTags(siteUrl, slug, cluster));
+        if (patched !== liveHtml) {
+          await ghPutFile(gh, postPath, branch,
+            `Refresh ${vLang.toUpperCase()} hreflang: ${slug}`,
+            b64encode(patched),
+            existing.sha
+          );
+          publishResults.push({ lang: vLang, rewritten: true, hreflangOnly: true });
+        } else {
+          publishResults.push({ lang: vLang, rewritten: false, reason: "already current" });
+        }
+      }
+    } catch (e) {
+      console.error(`[${id}] Rewrite failed for ${vLang} during retranslate:`, e.message);
+      publishResults.push({ lang: vLang, rewritten: false, error: e.message });
+    }
+
+    // Card injection only for languages we actually retranslated — a pure
+    // hreflang refresh doesn't change title or excerpt, so the card is fine.
+    const fresh = freshByLang.get(vLang);
+    if (!fresh) continue;
+
+    try {
+      const indexPath = vLang === enLang ? "blog/index.html" : `blog/${vLang}/index.html`;
       const indexFile = await ghGetFile(gh, indexPath, branch);
       if (indexFile) {
         const indexHtml = b64decode(indexFile.content);
-        const cardUrl = `/blog/posts/${vLang}/${slug}`;
+        const cardUrl = vLang === enLang
+          ? `/blog/posts/${slug}`
+          : `/blog/posts/${vLang}/${slug}`;
         const updated = injectCard(indexHtml, {
-          slug, title: v.title,
-          excerpt: v.excerpt || v.metaDescription || "",
+          slug, title: fresh.title,
+          excerpt: fresh.excerpt || fresh.metaDescription || "",
           heroImg, dateIso: savedIso, dateDisplay: vDateDisplay,
           url: cardUrl,
         }, profile, vLang);
         if (updated && updated !== indexHtml) {
           await ghPutFile(gh, indexPath, branch,
-            `Add "${v.title}" to ${vLang} blog index`,
+            `Update "${fresh.title}" on ${vLang} blog index`,
             b64encode(updated),
             indexFile.sha
           );
-          cardInjected = true;
         }
       } else {
         console.warn(`[${id}] ${indexPath} not found — skipping card for ${vLang}.`);
@@ -1070,8 +1132,6 @@ async function retranslatePost(res, id, profile, body) {
     } catch (e) {
       console.error(`[${id}] Card injection failed for ${vLang} during retranslate:`, e.message);
     }
-
-    publishResults.push({ lang: vLang, cardInjected });
   }
 
   // Update snapshot's publishedLangs so future retranslates know the full cluster.
@@ -1177,44 +1237,90 @@ async function deletePost(res, id, profile, body) {
 
   const postTitle = (historyEntry && (historyEntry.title || historyEntry.topic)) || slug;
 
-  // ---- 2) Delete the post file from the repo ----
-  let fileDeleted = false;
-  const postPath = `blog/posts/${slug}.html`;
+  // ---- 1b) Work out which languages this post exists in (fix 2026-08-31) ----
+  //  Before translations existed, a post was one file and one card. Now an EN
+  //  post can have DE/ES/HU siblings, each with its own file and its own index
+  //  card. Deleting only the EN pair left orphans: dead translated pages still
+  //  live and still linked from the language indexes.
+  //
+  //  Language discovery, most reliable first:
+  //    1. the article snapshot written at publish time (publishedLangs)
+  //    2. the history entry's translations array
+  //    3. the tenant's configured translation languages
+  //  Then every candidate is probed on GitHub, so a language that was never
+  //  actually published is skipped rather than logged as a failed delete.
+  const enLang = profile.primaryLanguage || "en";
+  let candidateLangs = [];
   try {
-    const existing = await ghGetFile(gh, postPath, branch);
-    if (!existing) {
-      warnings.push(`${postPath} was not in the repo (already deleted?).`);
-    } else {
-      await ghDeleteFile(gh, postPath, branch, `Delete blog post: ${postTitle}`, existing.sha);
-      fileDeleted = true;
-    }
+    const snap = await getRaw(`t:${id}:articles:${slug}`);
+    if (snap && Array.isArray(snap.publishedLangs)) candidateLangs = snap.publishedLangs.slice();
   } catch (e) {
-    warnings.push("Post file delete failed: " + e.message);
+    warnings.push("Snapshot read failed: " + e.message);
+  }
+  if (!candidateLangs.length && historyEntry && Array.isArray(historyEntry.translations)) {
+    candidateLangs = [enLang, ...historyEntry.translations.map(t => t && t.lang).filter(Boolean)];
+  }
+  if (!candidateLangs.length) {
+    const cfg = (profile.translations && Array.isArray(profile.translations.langs))
+      ? profile.translations.langs : [];
+    candidateLangs = [enLang, ...cfg];
+  }
+  candidateLangs = Array.from(new Set([enLang, ...candidateLangs]));
+
+  // ---- 2) Delete the post file for every language ----
+  let fileDeleted = false;          // EN file — kept for response back-compat
+  const deletedFiles = [];
+  for (const lang of candidateLangs) {
+    const postPath = lang === enLang
+      ? `blog/posts/${slug}.html`
+      : `blog/posts/${lang}/${slug}.html`;
+    try {
+      const existing = await ghGetFile(gh, postPath, branch);
+      if (!existing) {
+        // Only worth reporting for the primary language — a missing translation
+        // just means that language was never published.
+        if (lang === enLang) warnings.push(`${postPath} was not in the repo (already deleted?).`);
+        continue;
+      }
+      await ghDeleteFile(gh, postPath, branch,
+        lang === enLang
+          ? `Delete blog post: ${postTitle}`
+          : `Delete ${lang.toUpperCase()} translation: ${postTitle}`,
+        existing.sha);
+      deletedFiles.push(lang);
+      if (lang === enLang) fileDeleted = true;
+    } catch (e) {
+      warnings.push(`Post file delete failed (${lang}): ` + e.message);
+    }
   }
 
-  // ---- 3) Remove the card from blog/index.html ----
-  let cardRemoved = false;
-  try {
-    const indexPath = "blog/index.html";
-    const indexFile = await ghGetFile(gh, indexPath, branch);
-    if (!indexFile) {
-      warnings.push("blog/index.html not found — no card to remove.");
-    } else {
+  // ---- 3) Remove the card from every language index ----
+  let cardRemoved = false;          // EN card — kept for response back-compat
+  const removedCards = [];
+  for (const lang of candidateLangs) {
+    const indexPath = lang === enLang ? "blog/index.html" : `blog/${lang}/index.html`;
+    try {
+      const indexFile = await ghGetFile(gh, indexPath, branch);
+      if (!indexFile) {
+        if (lang === enLang) warnings.push("blog/index.html not found — no card to remove.");
+        continue;
+      }
       const indexHtml = b64decode(indexFile.content);
       const result = removeCardBySlug(indexHtml, slug);
-      if (result.removed) {
-        await ghPutFile(gh, indexPath, branch,
-          `Remove "${postTitle}" from blog index`,
-          b64encode(result.html),
-          indexFile.sha
-        );
-        cardRemoved = true;
-      } else {
-        warnings.push("No matching card found in blog/index.html (nothing to remove).");
+      if (!result.removed) {
+        if (lang === enLang) warnings.push("No matching card found in blog/index.html (nothing to remove).");
+        continue;
       }
+      await ghPutFile(gh, indexPath, branch,
+        `Remove "${postTitle}" from ${lang} blog index`,
+        b64encode(result.html),
+        indexFile.sha
+      );
+      removedCards.push(lang);
+      if (lang === enLang) cardRemoved = true;
+    } catch (e) {
+      warnings.push(`Card removal failed (${lang}): ` + e.message);
     }
-  } catch (e) {
-    warnings.push("Card removal failed: " + e.message);
   }
 
   // ---- 4) Drop the entry (or entries) from tenant history ----
@@ -1228,6 +1334,19 @@ async function deletePost(res, id, profile, body) {
     warnings.push("History update failed: " + e.message);
   }
 
+  // ---- 4b) Drop the article snapshot ----
+  //  Leaving it behind would let a later retranslate resurrect a post the
+  //  operator deliberately deleted. Overwritten rather than hard-deleted so the
+  //  key keeps a tombstone, matching how the audit record behaves.
+  try {
+    await setRaw(`t:${id}:articles:${slug}`, {
+      deleted: true,
+      deletedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    warnings.push("Snapshot clear failed: " + e.message);
+  }
+
   // ---- 5) Audit record (non-critical) ----
   try {
     await setRaw(`t:${id}:deleted:${slug}`, {
@@ -1237,6 +1356,8 @@ async function deletePost(res, id, profile, body) {
       deletedAt: new Date().toISOString(),
       fileDeleted,
       cardRemoved,
+      deletedFiles,
+      removedCards,
       entry: historyEntry || null,
     });
   } catch (e) {
@@ -1250,6 +1371,8 @@ async function deletePost(res, id, profile, body) {
     title: postTitle,
     fileDeleted,
     cardRemoved,
+    deletedFiles,
+    removedCards,
     historyRemoved,
     warnings,
   });
@@ -1406,6 +1529,25 @@ function injectCard(indexHtml, p, profile, lang) {
   const readMore = READ_MORE_LABELS[lang] || READ_MORE_LABELS.en;
   const cardHtml = buildCardHtml(p, profile, middle, readMore);
 
+  // ---- IDEMPOTENCE (fix 2026-08-31) --------------------------------------
+  // A card for this post may already exist — a retranslate rewrites a language
+  // that was published before, and a re-publish of the same slug hits the same
+  // path. The old code prepended unconditionally, so each of those produced a
+  // visible duplicate card on the index (observed on blog/hu/index.html).
+  //
+  // Match on the card's own URL rather than the bare slug: on a language index
+  // the URL is /blog/posts/{lang}/{slug}, and a bare-slug search would also hit
+  // a different language's card if both ever appeared in one region. The
+  // trailing boundary guard stops "my-post" matching "my-post-2".
+  const cardUrl = p.url || `/blog/posts/${p.slug}`;
+  const existing = findCardByUrl(middle, cardUrl);
+  if (existing) {
+    // Replace in place — keeps chronological position, refreshes title/excerpt
+    // to whatever the new translation produced.
+    middle = middle.slice(0, existing.from) + cardHtml.trim() + middle.slice(existing.to);
+    return before + middle + after;
+  }
+
   // Does the region already contain a real card?
   const articleMatch = middle.match(/<article\b/i);
 
@@ -1433,6 +1575,20 @@ function injectCard(indexHtml, p, profile, lang) {
   }
 
   return before + middle + after;
+}
+
+// Locate an existing <article> card in the blog-list region whose markup links
+// to `url`. Returns { from, to } (to exclusive) or null. Uses the same
+// nesting-aware scanner as removeCardBySlug so a card containing a nested
+// <article> can never be half-matched.
+function findCardByUrl(region, url) {
+  if (!url) return null;
+  const urlRe = new RegExp('href="' + escapeRegex(url) + '(?:\\.html)?"');
+  const blocks = findArticleBlocks(region);
+  for (const b of blocks) {
+    if (urlRe.test(region.slice(b.from, b.to))) return b;
+  }
+  return null;
 }
 
 // Build the card HTML — Plan A (profile config) → Plan B (sniff) → Plan C (default).
